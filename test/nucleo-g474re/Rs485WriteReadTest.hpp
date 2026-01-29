@@ -22,25 +22,27 @@ struct Drivers {
     using Rs485 = Rs485_UART_DMA;
     using Uart = Uart_UART_DMA;
     Rs485 uart1{loop,
-        gpio::Config::PA10 | gpio::Config::AF7, // USART1 RX (CN9 3)
-        gpio::Config::PA9 | gpio::Config::AF7, // USART1 TX (CN5 1)
-        gpio::Config::PA12, // DE (CN10 12)
+        gpio::PA10 | gpio::AF7, // USART1 RX (CN9 3)
+        gpio::PA9 | gpio::AF7, // USART1 TX (CN5 1)
+        gpio::PA12, // DE (CN10 12)
         USART1_CLOCK,
-        usart::USART1_INFO,
+        uart::USART1_INFO,
         dma::DMA1_CH1_CH2_INFO,
-        usart::Config::DEFAULT,
+        uart::Config::DEFAULT,
+        uart::Format::DEFAULT,
         38400, // baud rate
         20}; // RX timeout in bit times
     Rs485::Buffer<128> buffer1{uart1};
 
     Rs485 uart2{loop,
-        gpio::Config::PB8 | gpio::Config::AF7, // USART3 RX (CN5 10)
-        gpio::Config::PB9 | gpio::Config::AF7, // USART3 TX (CN5 9)
-        gpio::Config::PA8 | gpio::Config::INVERT, // nDE (CN9 8)
+        gpio::PB8 | gpio::AF7, // USART3 RX (CN5 10)
+        gpio::PB9 | gpio::AF7, // USART3 TX (CN5 9)
+        gpio::PA8 | gpio::Config::INVERT, // nDE (CN9 8)
         USART3_CLOCK,
-        usart::USART3_INFO,
+        uart::USART3_INFO,
         dma::DMA1_CH3_CH4_INFO,
-        usart::Config::DEFAULT,
+        uart::Config::DEFAULT,
+        uart::Format::DEFAULT,
         38400, // baud rate
         20}; // RX timeout in bit times
     Rs485::Buffer<128> buffer2{uart2};
@@ -48,6 +50,7 @@ struct Drivers {
 
 Drivers drivers;
 
+// Interrupt handlers (check in startup code if the handler name exists to prevent typos)
 extern "C" {
 void USART1_IRQHandler() {
     drivers.uart1.UART_IRQHandler();

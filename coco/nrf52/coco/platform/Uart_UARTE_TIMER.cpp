@@ -8,37 +8,22 @@
 namespace coco {
 
 Uart_UARTE_TIMER::Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin,
-    const uart::InfoE &uartInfo, const timer::Info &timerInfo, ppi::DualChannel ppiChannels, uart::Config config,
-    int baudRate, int rxTimeout)
+    const UartInfo &uartInfo, const timer::Info &timerInfo, ppi::DualChannel ppiChannels,
+    uart::Config config, uart::Format format, int baudRate, int rxTimeout)
     : Uart(State::READY)
-    , loop(loop), baudRate(baudRate)
+    , loop_(loop), baudRate_(baudRate)
 {
-    // configure UART pins
-    if (rxPin != gpio::Config::NONE) {
-        gpio::configureAlternate(rxPin);
-        uart->PSEL.RXD = gpio::getPinIndex(rxPin);
-    }
-    if (txPin != gpio::Config::NONE) {
-        gpio::configureAlternate(txPin);
-        uart->PSEL.TXD = gpio::getPinIndex(txPin);
-    }
-
     // configure UART
-    auto uart = this->uart = uartInfo.uart;
-    uart->INTENSET = N(UARTE_INTENSET_ENDRX, Set) | N(UARTE_INTENSET_ENDTX, Set);
-    this->uartIrq = uartInfo.irq;
-    nvic::setPriority(this->uartIrq, nvic::Priority::MEDIUM); // interrupt gets enabled in first call to start()
-
-    // set baud rate
-    // https://devzone.nordicsemi.com/f/nordic-q-a/391/uart-baudrate-register-values
-    int br = (int64_t(baudRate) << 32) / 16000000;
-    uart->BAUDRATE = (br + 0x800) & 0xFFFFF000;
-
-    // set config (parity, stop bits, flow control)
-    uart->CONFIG = int(config);
+    auto uart = uart_ = uartInfo.instance()
+        .enable(uartInfo.enableRxTxPins(rxPin, txPin, config),
+            format,
+            baudRate * 1Hz,
+            uart::Interrupt::ENDRX | uart::Interrupt::ENDTX);
+    uartIrq_ = uartInfo.irq;
+    nvic::setPriority(uartIrq_, nvic::Priority::MEDIUM); // interrupt gets enabled in first call to start()
 
     // configure TIMER
-    auto timer = this->timer = timerInfo.timer;
+    auto timer = timer_ = timerInfo.timer;
     timer->BITMODE = N(TIMER_BITMODE_BITMODE, 32Bit);
     timer->PRESCALER = V(TIMER_PRESCALER_PRESCALER, 4); // 1MHz
     timer->CC[0] = (int64_t(1000000) * rxTimeout) / baudRate; // convert bit times to us
@@ -57,55 +42,91 @@ Uart_UARTE_TIMER::Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::C
     NRF_PPI->CH[timeoutIndex].EEP = uintptr_t(&timer->EVENTS_COMPARE[0]);
     NRF_PPI->CH[timeoutIndex].TEP = uintptr_t(&uart->TASKS_STOPRX);
 
-    // set enable fags
+    // set enable flags
     if (rxTimeout > 0)
-        NRF_PPI->CHENSET = this->ppiFlags = (1 << resetIndex) | (1 << timeoutIndex);
+        NRF_PPI->CHENSET = ppiFlags_ = (1 << resetIndex) | (1 << timeoutIndex);
 
-    // enable UART
-    uart->ENABLE = N(UARTE_ENABLE_ENABLE, Enabled);
+    // clear interrupt flags
+    uart->EVENTS_ENDRX = 0;
+    uart->EVENTS_ENDTX = 0;
+    nvic::clear(uartIrq_);
 }
 
 Uart_UARTE_TIMER::~Uart_UARTE_TIMER() {
 }
 
-//StateTasks<const Device::State, Device::Events> &Uart_UARTE_TIMER::getStateTasks() {
-//	return makeConst(this->st);
-//}
-
 int Uart_UARTE_TIMER::getBufferCount() {
-    return this->buffers.count();
+    return buffers_.count();
 }
 
 Uart_UARTE_TIMER::BufferBase &Uart_UARTE_TIMER::getBuffer(int index) {
-    return this->buffers.get(index);
+    return buffers_.get(index);
 }
 
 void Uart_UARTE_TIMER::setValue(int id, int value) {
     switch (id) {
     case Value::FORMAT:
+        // set format
         {
+            //auto dataBits = Format(value) & Format::DATA_MASK;
+            auto parity = Format(value) & Format::PARITY_MASK;
+            auto stopBits = Format(value) & Format::STOP_MASK;
+
+            auto format = uart::Format::NONE;
+
+            switch (parity) {
+            case Format::PARITY_EVEN:
+                format |= uart::Format::PARITY_EVEN;
+                break;
+            default:
+                format |= uart::Format::PARITY_NONE;
+            }
+
+            switch (stopBits) {
+            case Format::STOP_2:
+                format |= uart::Format::STOP_2;
+                break;
+            default:
+                format |= uart::Format::STOP_1;
+            }
+
+            uart_.setFormat(format);
+
+/*
             auto format = Format(value);
             auto parity = format & Format::PARITY_MASK;
             auto stopBits = format & Format::STOP_MASK;
             uint32_t mask = N(UARTE_CONFIG_PARITY, Msk) | N(UARTE_CONFIG_STOP, Msk);
-            this->uart->CONFIG = (this->uart->CONFIG & ~mask)
+            uart_->CONFIG = (uart_->CONFIG & ~mask)
                 | (parity == Format::PARITY_EVEN ? N(UARTE_CONFIG_PARITY, Included) : N(UARTE_CONFIG_PARITY, Excluded))
                 | (stopBits == Format::STOP_2 ? N(UARTE_CONFIG_STOP, Two) : N(UARTE_CONFIG_STOP, One));
+*/
         }
         break;
     case Value::BAUD:
+        // set baud rate
         {
-            this->baudRate = value;
-            int br = (int64_t(value) << 32) / 16000000;
-            this->uart->BAUDRATE = (br + 0x800) & 0xFFFFF000;
+            nvic::Guard gurad(uartIrq_);
+            if (sendTransfers_.empty()) {
+                // no send transfer in progress: apply immediately
+                uart_.setBaudRate(value * 1Hz);
+            } else {
+                // store new baud rate to apply it after send transfers
+                newBaudRate_ = value;
+            }
         }
+        /*{
+            baudRate_ = value;
+            int br = (int64_t(value) << 32) / 16000000;
+            uart_->BAUDRATE = (br + 0x800) & 0xFFFFF000;
+        }*/
         break;
     case Value::RX_TIMEOUT:
-        this->timer->CC[0] = (int64_t(1000000) * value) / this->baudRate; // convert bit times to us
+        timer_->CC[0] = (int64_t(1000000) * value) / baudRate_; // convert bit times to us
         if (value > 0)
-            NRF_PPI->CHENSET = this->ppiFlags;
+            NRF_PPI->CHENSET = ppiFlags_;
         else
-            NRF_PPI->CHENCLR = this->ppiFlags;
+            NRF_PPI->CHENCLR = ppiFlags_;
         break;
     }
 }
@@ -116,17 +137,17 @@ int Uart_UARTE_TIMER::getValue(int id) {
 
 // called from UART interrupt
 void Uart_UARTE_TIMER::UARTE_IRQHandler() {
-    auto uart = this->uart;
+    auto uart = uart_;
 
     // check if receive has completed or timed out
     if (uart->EVENTS_ENDRX) {
         // clear interrupt flag
         uart->EVENTS_ENDRX = 0;
 
-        this->receiveTransfers.pop(
+        receiveTransfers_.pop(
             [this, uart](BufferBase &buffer) {
-                buffer.p.size = uart->RXD.AMOUNT;
-                this->loop.push(buffer);
+                buffer.size_ = uart->RXD.AMOUNT;
+                loop_.push(buffer);
                 return true;
             },
             [](BufferBase &next) {
@@ -141,18 +162,18 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         // clear interrupt flag
         uart->EVENTS_ENDTX = 0;
 
-        this->sendTransfers.pop(
+        int result = sendTransfers_.pop(
             [this](BufferBase &buffer) {
-                if ((buffer.op & BufferBase::Op::READ) != 0) {
+                if ((buffer.op_ & BufferBase::Op::READ) != 0) {
                     // read after write
-                    buffer.op &= ~BufferBase::Op::WRITE;
+                    buffer.op_ &= ~BufferBase::Op::WRITE;
 
                     // add to list of pending receive transfers and start immediately if list was empty
-                    if (this->receiveTransfers.push(buffer))
+                    if (receiveTransfers_.push(buffer))
                         buffer.startRx();
                 } else {
                     // pass buffer to event loop so that application gets notified
-                    this->loop.push(buffer);
+                    loop_.push(buffer);
                 }
                 return true;
             },
@@ -161,43 +182,47 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
                 next.startTx();
             }
         );
+        if (result != 2 && newBaudRate_ > 0) {
+            uart.setBaudRate(newBaudRate_ * 1Hz);
+            newBaudRate_ = 0;
+        }
     }
 }
 
 
-// BufferBase
+// Uart_UARTE_TIMER::BufferBase
 
-Uart_UARTE_TIMER::BufferBase::BufferBase(uint8_t *data, int size, Uart_UARTE_TIMER &device)
-    : coco::Buffer(data, size, BufferBase::State::READY), device(device)
+Uart_UARTE_TIMER::BufferBase::BufferBase(uint8_t *data, int capacity, Uart_UARTE_TIMER &device)
+    : coco::Buffer(data, capacity, BufferBase::State::READY), device_(device)
 {
-    device.buffers.add(*this);
+    device.buffers_.add(*this);
 }
 
 Uart_UARTE_TIMER::BufferBase::~BufferBase() {
 }
 
 bool Uart_UARTE_TIMER::BufferBase::start(Op op) {
-    if (this->st.state != State::READY) {
-        assert(this->st.state != State::BUSY);
+    if (st.state != State::READY) {
+        assert(st.state != State::BUSY);
         return false;
     }
 
     // check if READ or WRITE flag is set
     assert((op & Op::READ_WRITE) != 0);
 
-    this->op = op;
-    auto &device = this->device;
+    op_ = op;
+    auto &device = device_;
     if ((op & Op::WRITE) == 0) {
         // read
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.receiveTransfers.push(nvic::Guard(device.uartIrq), *this))
+        if (device.receiveTransfers_.push(nvic::Guard(device.uartIrq_), *this))
             startRx();
     } else {
         // write
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.sendTransfers.push(nvic::Guard(device.uartIrq), *this))
+        if (device.sendTransfers_.push(nvic::Guard(device.uartIrq_), *this))
             startTx();
     }
 
@@ -208,18 +233,18 @@ bool Uart_UARTE_TIMER::BufferBase::start(Op op) {
 }
 
 bool Uart_UARTE_TIMER::BufferBase::cancel() {
-    if (this->st.state != State::BUSY)
+    if (st.state != State::BUSY)
         return false;
-    auto &device = this->device;
+    auto &device = device_;
 
-    if ((this->op & Op::WRITE) != 0) {
+    if ((op_ & Op::WRITE) != 0) {
         // write
 
         // remove read flag in case there is a read after write
-        this->op &= ~Op::READ;
+        op_ &= ~Op::READ;
 
         // remove from pending transfers if not yet started, otherwise complete normally
-        if (device.sendTransfers.remove(nvic::Guard(device.uartIrq), *this, false)) {
+        if (device.sendTransfers_.remove(nvic::Guard(device.uartIrq_), *this, false)) {
             // cancel succeeded: set buffer ready again
             // resume application code, therefore interrupt should be enabled at this point
             setReady(0);
@@ -228,43 +253,46 @@ bool Uart_UARTE_TIMER::BufferBase::cancel() {
         // read
 
         // remove from pending transfers if not yet started or nothing received yet, otherwise complete normally
-        if (device.receiveTransfers.remove(nvic::Guard(device.uartIrq), *this, false)) {
+        if (device.receiveTransfers_.remove(nvic::Guard(device.uartIrq_), *this, false)) {
             // cancel succeeded: set buffer ready again
             // resume application code, therefore interrupt should be enabled at this point
             setReady(0);
-        } else if (!device.uart->EVENTS_RXDRDY) {
+        } else if (!device.uart_->EVENTS_RXDRDY) {
             // haven't received anything yet: stop
-            device.uart->TASKS_STOPRX = TRIGGER;
+            device.uart_.stopRx();//->TASKS_STOPRX = TRIGGER;
         }
     }
     return true;
 }
 
 void Uart_UARTE_TIMER::BufferBase::startRx() {
-    auto &device = this->device;
-    auto uart = device.uart;
+    auto uart = device_.uart_;
 
     // set data
-    uart->RXD.PTR = uintptr_t(this->p.data);
-    uart->RXD.MAXCNT = this->p.capacity;
+    volatile uint8_t *data = data_;
+    uart.setRxData(data, size_);
 
     // clear RXDRDY
     uart->EVENTS_RXDRDY = 0;
+    //uart.clearRxDataReady();
 
     // start UART
-    uart->TASKS_STARTRX = TRIGGER;
+    uart.startRx();
+
+    // -> UARTE_IRQHandler
 }
 
 void Uart_UARTE_TIMER::BufferBase::startTx() {
-    auto &device = this->device;
-    auto uart = device.uart;
+    auto uart = device_.uart_;
 
     // set data
-    uart->TXD.PTR = uintptr_t(this->p.data);
-    uart->TXD.MAXCNT = this->p.size;
+    volatile uint8_t *data = data_;
+    uart.setTxData(data, size_);
 
     // start
-    uart->TASKS_STARTTX = TRIGGER;
+    uart.startTx();
+
+    // -> UARTE_IRQHandler
 }
 
 void Uart_UARTE_TIMER::BufferBase::handle() {

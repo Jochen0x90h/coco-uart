@@ -1,7 +1,8 @@
-#include <UartSendTest.hpp>
+#include <UartTest.hpp>
 #include <coco/Loop.hpp>
 #include <coco/debug.hpp>
 #include <coco/BufferWriter.hpp>
+#include <coco/StreamOperators.hpp>
 #ifdef NATIVE
 #include <iostream>
 #endif
@@ -21,9 +22,9 @@ using namespace coco;
 
 // periodically send "Hello UART"
 Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
-    bool toggle = false;
+    int baudRate = 38400;
     while (buffer.ready()) {
-        //uart.setControl(Uart::ControlLineState::DTR | Uart::Control::RTS);
+        //uart.setOutputSignals(Uart::OutputSignals::DTR | Uart::OutputSignals::RTS);
 
         debug::out << "Send\n";
 #ifndef NATIVE
@@ -32,30 +33,37 @@ Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
         co_await buffer.write("Hello UART");
         co_await loop.sleep(500ms);
 
-        // make sure no read/write operation is in progress when calling setBaudRate()
-        //uart.setBaudRate(toggle ? 38400 : 100000);
-        toggle = !toggle;
+        // toggle baud rate
+        uart.setBaudRate(baudRate);
+        baudRate ^= 100000 ^ 38400;
     }
 
     // failed to open device or device stopped working
     loop.exit();
 }
 
-// receive the "HEllo UART" from send()
+// receive the "Hello UART" from send()
 Coroutine receive(Loop &loop, Buffer &buffer) {
     while (buffer.ready()) {
+        // overwrite entire buffer
+        buffer.all().fill('x');
+
+        // start receiving
+        debug::out << "Receive\n";
         buffer.startRead();
-        //int r = co_await select(buffer.untilReadyOrDisabled(), loop.sleep(2s));
-        int r = 1; co_await buffer.untilReadyOrDisabled();
+        int r = co_await select(buffer.untilReadyOrDisabled(), loop.sleep(2s));
         if (r == 1) {
+            // output received string to debug console
             debug::out << buffer.string() << '\n';
 #ifndef NATIVE
             if (buffer.string() == "Hello UART") {
                 // ok
                 debug::toggleGreen();
+                debug::clearRed();
             } else {
                 // error
                 debug::toggleRed();
+                debug::out << "Error (size " << dec(buffer.size()) << ")\n";
             }
 #endif
         } else {
@@ -93,6 +101,8 @@ Coroutine detect(Loop &loop, Uart &uart) {
     }
 }
 
+
+
 #ifdef NATIVE
 // Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM9"
 int main(int argc, char **argv) {
@@ -102,6 +112,8 @@ int main(int argc, char **argv) {
 #else
 int main() {
 #endif
+    debug::out << "UartTest\n";
+
     send(drivers.loop, drivers.uart, drivers.sendBuffer);
     receive(drivers.loop, drivers.receiveBuffer);
     detect(drivers.loop, drivers.uart);

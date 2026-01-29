@@ -1,5 +1,6 @@
 #include "Uart_UART_DMA.hpp"
 //#include <coco/debug.hpp>
+//#include <coco/StreamOperators.hpp>
 
 
 namespace coco {
@@ -7,233 +8,217 @@ namespace coco {
 // Uart_UART_DMA
 
 Uart_UART_DMA::Uart_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin,
-    Hertz<> clock, const usart::Info &uartInfo, const dma::Info2 &dmaInfo,
-    usart::Config config, int baudRate, int rxTimeout, uint32_t cr3)
+    Hertz<> clock, const UartInfo &uartInfo, const DmaInfo &dmaInfo,
+    uart::Config config, uart::Format format, int baudRate, int rxTimeout)
     : Uart(State::READY)
-    , loop(loop)
-    , clock(clock)
+    , loop_(loop)
+    , clock_(clock)
 {
-    // enable clocks (note two cycles wait time until peripherals can be accessed, see STM32G4 reference manual section 7.2.17)
-    uartInfo.rcc.enableClock();
-    dmaInfo.rcc.enableClock();
-
-    // configure UART pins
-    if (rxPin != gpio::Config::NONE)
-        gpio::configureAlternateInput(rxPin);
-    if (txPin != gpio::Config::NONE)
-        gpio::configureAlternate(txPin);
-
     // configure UART
-    auto uart = this->uart = uartInfo.usart;
-    uart->CR2 = usart::CR2(config)
-        | ((rxPin & gpio::Config::INVERT) != 0 ? USART_CR2_RXINV : 0) // invert RX
-        | ((txPin & gpio::Config::INVERT) != 0 ? USART_CR2_TXINV : 0) // invert TX
-        | (rxTimeout > 0 ? USART_CR2_RTOEN : 0); // enable receiver timeout
-    uart->CR3 = cr3
-        | USART_CR3_DMAR | USART_CR3_DMAT; // DMA mode
-    this->uartIrq = uartInfo.irq;
-    nvic::setPriority(this->uartIrq, nvic::Priority::MEDIUM); // interrupt gets enabled in first call to start()
+    auto uart = uart_ = uartInfo.enableClock()
+        .enable(uartInfo.enableRxTxPins(rxPin, txPin, config),
+            format,
+            clock, baudRate * 1Hz,
+            uart::Interrupt::RX_TIMEOUT | uart::Interrupt::TX_COMPLETE,
+            uart::DmaRequest::RX_TX)
+        .setRxTimeout(rxTimeout)
+        .startTx();
+    uartIrq_ = uartInfo.irq;
+    nvic::setPriority(uartIrq_, nvic::Priority::MEDIUM); // interrupt gets enabled in first call to start()
 
-    // set baud rate
-    uart->BRR = (int(this->clock) + (baudRate >> 1)) / baudRate;
-
-    // set receiver timeout
-    uart->RTOR = rxTimeout;
-
-    // configure RX DMA channel
-    this->rxStatus = dmaInfo.status1();
-    this->rxChannel = dmaInfo.channel1();
-    this->rxChannel.setPeripheralAddress(&uart->RDR);
-    this->rxDmaIrq = dmaInfo.irq1;
-    nvic::setPriority(this->rxDmaIrq, nvic::Priority::MEDIUM);
-
-    // configure TX DMA channel
-    this->txChannel = dmaInfo.channel2();
-    this->txChannel.setPeripheralAddress(&uart->TDR);
+    // configure DMA channels
+    auto [rxChannel, txChannel] = dmaInfo.enableClock<RxChannel::MODE, TxChannel::MODE>();
+    rxChannel_ = rxChannel
+        .configure()
+        .setSourceAddress(&uart->RDR);
+    rxDmaIrq_ = dmaInfo.irq1;
+    nvic::setPriority(rxDmaIrq_, nvic::Priority::MEDIUM);
+    txChannel_ = txChannel
+        .configure()
+        .setDestinationAddress(&uart->TDR);
 
     // map DMA to UART
     uartInfo.map(dmaInfo);
 
-    // enable UART and transmitter
-    uint32_t cr1 = usart::CR1(config) | USART_CR1_UE | USART_CR1_TE;
-    uart->CR1 = cr1;
+    // clear interrupt flags
+    uart.clear(uart::Status::ALL);
+    nvic::clear(uartIrq_);
 
-    // wait until transmitter enable gets acknowledged
-    while ((uart->ISR & USART_ISR_TEACK) == 0);
-
-    // clear and enable transmission complete interrupt
-    uart->ICR = USART_ICR_TCCF;
-    uart->CR1 = cr1 | USART_CR1_TCIE;
+    // uartIrq and rxDmaIrq get enabled in first call to start()
 }
 
 Uart_UART_DMA::~Uart_UART_DMA() {
 }
 
-//StateTasks<const Device::State, Device::Events> &Uart_UART_DMA::getStateTasks() {
-//	return makeConst(this->st);
-//}
-
 int Uart_UART_DMA::getBufferCount() {
-    return this->buffers.count();
+    return buffers_.count();
 }
 
 Uart_UART_DMA::BufferBase &Uart_UART_DMA::getBuffer(int index) {
-    return this->buffers.get(index);
+    return buffers_.get(index);
 }
 
 void Uart_UART_DMA::setValue(int id, int value) {
     switch (id) {
     case Value::FORMAT:
-    case Value::BAUD:
-    case Value::RX_TIMEOUT:
+        // set format
         {
-            auto uart = this->uart;
-            uint32_t cr1 = uart->CR1;
+            auto dataBits = Format(value) & Format::DATA_MASK;
+            auto parity = Format(value) & Format::PARITY_MASK;
+            auto stopBits = Format(value) & Format::STOP_MASK;
 
-            // disable uart
-            uart->CR1 = 0;
+            auto format = uart::Format::NONE;
 
-            // configure
-            if (id == Value::FORMAT) {
-                // set format
-                auto format = Format(value);
-                auto dataBits = format & Format::DATA_MASK;
-                auto parity = format & Format::PARITY_MASK;
-                auto stopBits = format & Format::STOP_MASK;
-
-                cr1 &= ~(USART_CR1_M | USART_CR1_PCE | USART_CR1_PS);
-#ifdef USART_CR1_M1
-                if (dataBits == Format::DATA_7)
-                    cr1 |= USART_CR1_M1;
-                else if (dataBits == Format::DATA_9)
-                    cr1 |= USART_CR1_M0;
-#else
-                if (dataBits == Format::DATA_9)
-                    cr1 |= USART_CR1_M;
+            switch (dataBits) {
+#ifdef HAVE_USART_DATA_7
+            case Format::DATA_7:
+                format |= uart::Format::DATA_7;
+                break;
 #endif
-                if (parity != Format::PARITY_NONE) {
-                    cr1 |= USART_CR1_PCE;
-                    if (parity == Format::PARITY_ODD)
-                        cr1 |= USART_CR1_PS;
-                }
-                uint32_t cr2 = uart->CR2 & ~(USART_CR2_STOP);
-                if (stopBits == Format::STOP_1_5)
-                    cr2 |= USART_CR2_STOP_0 | USART_CR2_STOP_1;
-                else if (stopBits == Format::STOP_2)
-                    cr2 |= USART_CR2_STOP_1;
-                uart->CR2 = cr2;
-            } else if (id == Value::BAUD) {
-                // set baud rate
-                uart->BRR = (int(this->clock) + (value >> 1)) / value;
-            } else {
-                // set receiver timeout
-                uart->RTOR = value;
-                uint32_t cr2 = uart->CR2 & ~(USART_CR2_RTOEN);
-                if (value > 0)
-                    cr2 |= USART_CR2_RTOEN;
-                uart->CR2 = cr2;
+            case Format::DATA_9:
+                format |= uart::Format::DATA_9;
+                break;
+            default:
+                format |= uart::Format::DATA_8;
             }
 
-            // enable UART and transmitter
-            uart->CR1 = (cr1 & ~USART_CR1_TCIE) | USART_CR1_UE | USART_CR1_TE;
+            switch (parity) {
+            case Format::PARITY_EVEN:
+                format |= uart::Format::PARITY_EVEN;
+                break;
+            case Format::PARITY_ODD:
+                format |= uart::Format::PARITY_ODD;
+                break;
+            default:
+                format |= uart::Format::PARITY_NONE;
+            }
 
-            // wait until transmitter enable gets acknowledged
-            while ((uart->ISR & USART_ISR_TEACK) == 0);
+            switch (stopBits) {
+            case Format::STOP_1_5:
+                format |= uart::Format::STOP_1_5;
+                break;
+            case Format::STOP_2:
+                format |= uart::Format::STOP_2;
+                break;
+            default:
+                format |= uart::Format::STOP_1;
+            }
 
-            // clear and enable transmission complete interrupt
-            uart->ICR = USART_ICR_TCCF;
-            uart->CR1 = cr1 | USART_CR1_UE | USART_CR1_TE | USART_CR1_TCIE;
+            uart_.setFormat(format);
         }
+        break;
+    case Value::BAUD:
+        // set baud rate
+        {
+            nvic::Guard2 gurad(uartIrq_, rxDmaIrq_);
+            if (sendTransfers_.empty()) {
+                // no send transfer in progress: apply immediately
+                uart_.setBaudRate(clock_, value * 1Hz);
+            } else {
+                // store new baud rate to apply it after send transfers
+                newBaudRate_ = value;
+            }
+        }
+        break;
+    case Value::RX_TIMEOUT:
+        // set receiver timeout
+        uart_.setRxTimeout(value);
         break;
     }
 }
 
 int Uart_UART_DMA::getValue(int id) {
+    switch (id) {
+    case Value::BAUD:
+        return int(uart_.getBaudRate(clock_));
+    }
     return 0;
 }
 
 void Uart_UART_DMA::startRx(BufferBase &buffer) {
-    auto uart = this->uart;
+    //debug::out << "startRx\n";
 
-    // enable receiver and wait until it gets acknowledged
-    auto cr1 = uart->CR1;
-    uart->CR1 = cr1 | USART_CR1_RE;
-    while ((uart->ISR & USART_ISR_REACK) == 0);
-
-    // clear and enable receiver timeout interrupt
-    uart->ICR = USART_ICR_RTOCF;
-    uart->CR1 = cr1 | USART_CR1_RE | USART_CR1_RTOIE;
+    // enable receiver
+    uart_.startRx();
 
     // configure and enable DMA
-    this->rxChannel.setMemoryAddress(buffer.p.data);
-    this->rxChannel.setCount(buffer.p.capacity);
-    this->rxChannel.enable(dma::Channel::Config::RX | dma::Channel::Config::TRANSFER_COMPLETE_INTERRUPT);
+    volatile void *data = buffer.data_;
+    rxChannel_
+        .setDestinationAddress(data)
+        .setCount(buffer.capacity_)
+        .enable(dma::Config::TRANSFER_COMPLETE_INTERRUPT);
+
+    // -> handleRx
 }
 
+// called when interrupts are disalbed (via BufferBase::start() or handleTx())
 void Uart_UART_DMA::startTx(BufferBase &buffer) {
+    //debug::out << "startTx\n";
     // configure and enable DMA
-    this->txChannel.setMemoryAddress(buffer.p.data);
-    this->txChannel.setCount(buffer.p.size);
-    this->txChannel.enable(dma::Channel::Config::TX);
+    volatile void *data = buffer.data_;
+    txChannel_
+        .setSourceAddress(data)
+        .setCount(buffer.size_)
+        .enable();
+
+    // -> handleTx
 }
 
+// called when interrupts are disalbed (via BufferBase::cancel() or handleTx())
 void Uart_UART_DMA::endTx() {
 }
 
+// called when interrupts are disalbed (via Rs485_UART_DMA::startTx())
 void Uart_UART_DMA::disableRx() {
-    nvic::Guard2 guard(this->uartIrq, this->rxDmaIrq);
+    //debug::out << "disableRx\n";
+    nvic::Guard2 guard(uartIrq_, rxDmaIrq_);
 
     // check if a receive transfer is in progress
-    this->receiveTransfers.pop(
+    receiveTransfers_.pop(
         [this](Uart_UART_DMA::BufferBase &buffer) {
 
             // check if we are still waiting for the first character
-            if (this->rxChannel.count() == int(buffer.p.capacity)) {
+            if (rxChannel_.count() == int(buffer.capacity_)) {
                 // keep receive buffer
                 return false;
             }
 
             // abort transfer and pass buffer to the event loop so that the application gets notified
-            buffer.p.size = 0;//rxBuffer.p.capacity - this->rxChannel->CNDTR;
-            this->loop.push(buffer);
+            buffer.size_ = 0;//rxBuffer.p.capacity - rxChannel->CNDTR;
+            loop_.push(buffer);
             return true;
         }
     );
 
-    // disable receiver and timeout interrupt
-    this->uart->CR1 = this->uart->CR1 & ~(USART_CR1_RE | USART_CR1_RTOIE);
-
-    // disable receiver DMA
-    this->rxChannel.disable();
-
-    // clear interrupt flags at peripherals and NVIC
-    this->uart->ICR = USART_ICR_RTOCF;
-    this->rxStatus.clear(dma::Status::Flags::TRANSFER_COMPLETE);
-    nvic::clear(this->uartIrq);
-    nvic::clear(this->rxDmaIrq);
+    // disable rx and DMA
+    uart_
+        .stopRx()
+        .clear(uart::Status::RX_TIMEOUT);
+    rxChannel_
+        .disable()
+        .clear(dma::Status::TRANSFER_COMPLETE);
+    nvic::clear(uartIrq_);
+    nvic::clear(rxDmaIrq_);
 }
 
 // called from UART or DMA interrupt
 void Uart_UART_DMA::handleRx() {
-    auto uart = this->uart;
+    //debug::out << "handleRx " << dec(rxChannel.count()) << "\n";
+    // disable rx and DMA
+    uart_
+        .stopRx()
+        .clear(uart::Status::RX_TIMEOUT);
+    rxChannel_
+        .disable()
+        .clear(dma::Status::TRANSFER_COMPLETE);
 
-    // disable receiver and timeout interrupt
-    uart->CR1 = uart->CR1 & ~(USART_CR1_RE | USART_CR1_RTOIE);
-
-    // disable DMA
-    this->rxChannel.disable();
-
-    // clear interrupt flags at UART and DMA
-    uart->ICR = USART_ICR_RTOCF;
-    this->rxStatus.clear(dma::Status::Flags::TRANSFER_COMPLETE);
-
-    this->receiveTransfers.pop(
+    receiveTransfers_.pop(
         [this](BufferBase &buffer) {
             // buffer size is number of received bytes
-            buffer.p.size = buffer.p.capacity - this->rxChannel.count();
+            buffer.size_ = buffer.capacity_ - rxChannel_.count();
 
             // inform application that receive is finished
-            this->loop.push(buffer);
+            loop_.push(buffer);
             return true;
         },
         [this](BufferBase &next) {
@@ -243,31 +228,32 @@ void Uart_UART_DMA::handleRx() {
     );
 }
 
-// called from UART interrupt
+// called from UART interrupt (DMA interrupt has same priority and therefore can't execute)
 void Uart_UART_DMA::handleTx() {
-    auto uart = this->uart;
+    //debug::out << "handleTx\n";
+    auto uart = uart_;
 
-    // disable DMA
-    this->txChannel.disable();
+    // disable tx DMA
+    txChannel_.disable();
 
     // clear interrupt flag at UART
-    uart->ICR = USART_ICR_TCCF;
+    uart.clear(uart::Status::TX_COMPLETE);
 
-    this->sendTransfers.pop(
+    int result = sendTransfers_.pop(
         [this](BufferBase &buffer) {
             // notify derived class that TX has ended
             endTx();
 
-            if ((buffer.op & BufferBase::Op::READ) != 0) {
+            if ((buffer.op_ & BufferBase::Op::READ) != 0) {
                 // read after write
-                buffer.op &= ~BufferBase::Op::WRITE;
+                buffer.op_ &= ~BufferBase::Op::WRITE;
 
                 // add to list of pending receive transfers and start immediately if list was empty
-                if (this->receiveTransfers.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
+                if (receiveTransfers_.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
                     startRx(buffer);
             } else {
                 // pass buffer to event loop so that application gets notified
-                this->loop.push(buffer);
+                loop_.push(buffer);
             }
             return true;
         },
@@ -276,44 +262,45 @@ void Uart_UART_DMA::handleTx() {
             startTx(next);
         }
     );
+    if (result != 2 && newBaudRate_ > 0) {
+        uart.setBaudRate(clock_, newBaudRate_ * 1Hz);
+        newBaudRate_ = 0;
+    }
 }
 
 
-// BufferBase
+// Uart_UART_DMA::BufferBase
 
-Uart_UART_DMA::BufferBase::BufferBase(uint8_t *data, int size, Uart_UART_DMA &device)
-    : coco::Buffer(data, size, BufferBase::State::READY), device(device)
+Uart_UART_DMA::BufferBase::BufferBase(uint8_t *data, int capacity, Uart_UART_DMA &device)
+    : coco::Buffer(data, capacity, BufferBase::State::READY), device_(device)
 {
-    device.buffers.add(*this);
+    device.buffers_.add(*this);
 }
 
 Uart_UART_DMA::BufferBase::~BufferBase() {
 }
 
 bool Uart_UART_DMA::BufferBase::start(Op op) {
-    if (this->st.state != State::READY) {
-        assert(this->st.state != State::BUSY);
+    if (st.state != State::READY || (op & Op::READ_WRITE) == 0 || size_ == 0) {
+        // starting a buffer when the state is BUSY is a bug
+        assert(st.state != State::BUSY);
         return false;
     }
 
-    // check if READ or WRITE flag is set
-    assert((op & Op::READ_WRITE) != 0);
-
-    this->op = op;
-    auto &device = this->device;
+    op_ = op;
+    auto &device = device_;
     if ((op & Op::WRITE) == 0) {
         // read
-        nvic::Guard2 gurad(device.uartIrq, device.rxDmaIrq);
+        nvic::Guard2 gurad(device.uartIrq_, device.rxDmaIrq_);
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.receiveTransfers.push(*this))
+        if (device.receiveTransfers_.push(*this))
             device.startRx(*this);
     } else {
         // write
 
         // add to list of pending transfers and start immediately if list was empty
-        // sentTransfers only gets modified from UART interrupt, therefore no need to disable dma irq
-        if (device.sendTransfers.push(nvic::Guard(device.uartIrq), *this))
+        if (device.sendTransfers_.push(nvic::Guard2(device.uartIrq_, device.rxDmaIrq_), *this))
             device.startTx(*this);
     }
 
@@ -324,24 +311,24 @@ bool Uart_UART_DMA::BufferBase::start(Op op) {
 }
 
 bool Uart_UART_DMA::BufferBase::cancel() {
-    if (this->st.state != State::BUSY)
+    if (st.state != State::BUSY)
         return false;
 
-    //return this->device.cancel(*this);
-    auto &device = this->device;
+    //return device.cancel(*this);
+    auto &device = device_;
 
-    if ((this->op & Op::WRITE) != 0) {
+    if ((op_ & Op::WRITE) != 0) {
         // write
 
         // remove read flag in case there is a read after write
-        this->op &= ~Op::READ;
+        op_ &= ~Op::READ;
 
         bool cancelled = false;
         {
-            nvic::Guard2 guard(device.uartIrq, device.rxDmaIrq);
+            nvic::Guard2 guard(device.uartIrq_, device.rxDmaIrq_);
 
             // remove from pending transfers if not yet started, otherwise complete normally
-            if (device.sendTransfers.remove(*this, false)) {
+            if (device.sendTransfers_.remove(*this, false)) {
                 device.endTx();
                 cancelled = true;
             }
@@ -359,22 +346,20 @@ bool Uart_UART_DMA::BufferBase::cancel() {
     } else {
         // read
 
-        // remove from pending transfers if not yet started or nothing received yet, otherwise complete normally
-        if (device.receiveTransfers.remove(nvic::Guard2(device.uartIrq, device.rxDmaIrq), *this,
+        // remove this buffer from pending transfers if not yet started or nothing received yet, otherwise complete normally
+        if (device.receiveTransfers_.remove(nvic::Guard2(device.uartIrq_, device.rxDmaIrq_), *this,
             [&device](BufferBase &buffer) {
                 // check if we are still waiting for the first character
-                if (device.rxChannel.count() == int(buffer.p.capacity)) {
-                    // disable receiver and timeout interrupt
-                    device.uart->CR1 = device.uart->CR1 & ~(USART_CR1_RE | USART_CR1_RTOIE);
-
-                    // disable DMA
-                    device.rxChannel.disable();
-
-                    // clear interrupt flags at peripherals and NVIC
-                    device.uart->ICR = USART_ICR_RTOCF;
-                    device.rxStatus.clear(dma::Status::Flags::TRANSFER_COMPLETE);
-                    nvic::clear(device.uartIrq);
-                    nvic::clear(device.rxDmaIrq);
+                if (device.rxChannel_.count() == int(buffer.capacity_)) {
+                    // disable rx and DMA
+                    device.uart_
+                        .stopRx()
+                        .clear(uart::Status::RX_TIMEOUT);
+                    device.rxChannel_
+                        .disable()
+                        .clear(dma::Status::TRANSFER_COMPLETE);
+                    nvic::clear(device.uartIrq_);
+                    nvic::clear(device.rxDmaIrq_);
 
                     return true;
                 }
