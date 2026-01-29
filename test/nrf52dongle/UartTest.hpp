@@ -8,19 +8,21 @@
 using namespace coco;
 
 
-// drivers for UartTest
-// board: https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/hardware/
+/// @brief Drivers for UartSendTest
+/// Board: https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/hardware/
+/// Connect RX and TX to test the loopback
 struct Drivers {
     Loop_RTC0 loop;
 
     using Uart = Uart_UARTE_TIMER;
     Uart uart{loop,
-        gpio::Config::P0_2, // RX (P2)
-        gpio::Config::P0_3, // TX (P3, lowest pin on right side when USB points towards top)
-        uart::UARTE0_INFO,
+        gpio::P0_2 | gpio::Config::PULL_UP, // RX (P2)
+        gpio::P0_3, // TX (P3, lowest pin on right side when USB points towards top)
+        uart::UARTE1_INFO,
         timer::TIMER1_INFO,
         ppi::PPI_CH0_CH1,
         uart::Config::DEFAULT,
+        uart::Format::DEFAULT,
         38400, // baud rate
         20}; // RX timeout in bit times
     Uart::Buffer<128> sendBuffer{uart};
@@ -29,8 +31,9 @@ struct Drivers {
 
 Drivers drivers;
 
+// Interrupt handlers (check in startup code if the handler name exists to prevent typos)
 extern "C" {
-void UARTE0_UART0_IRQHandler() {
+void UARTE1_IRQHandler() {
     drivers.uart.UARTE_IRQHandler();
 }
 }

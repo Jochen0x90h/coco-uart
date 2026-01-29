@@ -1,6 +1,7 @@
 #pragma once
 
 #include <coco/Uart.hpp>
+#include <coco/InterruptQueue.hpp>
 #include <coco/platform/Loop_Queue.hpp>
 #include <coco/platform/gpio.hpp>
 #include <coco/platform/nvic.hpp>
@@ -23,26 +24,24 @@ namespace coco {
 */
 class Uart_UARTE_TIMER : public Uart {
 public:
-    /**
-     * Constructor
-     * @param loop event loop
-     * @param rxPin receive pin (RX) and configuration (e.g. PULL_UP, can be NONE)
-     * @param txPin transmit pin (TX) pin (e.g. DRIVE_H0H1, can be NONE)
-     * @param instances instances to use
-     * @param ppiChannels two ppi channels
-     * @param baudRate baud rate
-     * @param format frame format
-     * @param rxTimeout receive timeout in bit times
-     */
-    Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, const uart::InfoE &uartInfo, const timer::Info &timerInfo,
-        ppi::DualChannel ppiChannels, uart::Config config, int baudRate, int rxTimeout);
+    using UartInfo = uart::Info<uart::Feature::DMA>;
+
+    /// @brief Constructor with only RX and TX pins.
+    /// @param loop event loop
+    /// @param rxPin receive pin (RX) and configuration (e.g. PULL_UP, can be NONE)
+    /// @param txPin transmit pin (TX) pin (e.g. DRIVE_H0H1, can be NONE)
+    /// @param instances instances to use
+    /// @param ppiChannels two ppi channels
+    /// @param baudRate baud rate
+    /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
+    /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
+    /// @param rxTimeout receive timeout in bit times
+    Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, const UartInfo &uartInfo, const timer::Info &timerInfo,
+        ppi::DualChannel ppiChannels, uart::Config config, uart::Format format, int baudRate, int rxTimeout);
 
     ~Uart_UARTE_TIMER() override;
 
     class BufferBase;
-
-    // Device methods
-    //StateTasks<const State, Events> &getStateTasks() override;
 
     // BufferDevice methods
     int getBufferCount();
@@ -58,13 +57,11 @@ public:
     class BufferBase : public coco::Buffer, public IntrusiveListNode, public Loop_Queue::Handler {
         friend class Uart_UARTE_TIMER;
     public:
-        /**
-            Constructor
-            @param data data of the buffer
-            @param capacity capacity of the buffer
-            @param channel channel to attach to
-        */
-        BufferBase(uint8_t *data, int size, Uart_UARTE_TIMER &device);
+        /// @brief Constructor
+        /// @param data data of the buffer
+        /// @param capacity capacity of the buffer
+        /// @param device Uart device to attach to
+        BufferBase(uint8_t *data, int capacity, Uart_UARTE_TIMER &device);
         ~BufferBase() override;
 
         // Device methods
@@ -76,50 +73,46 @@ public:
         void startTx();
         void handle() override;
 
-        Uart_UARTE_TIMER &device;
-
-        Op op;
+        Uart_UARTE_TIMER &device_;
+        Op op_;
     };
 
-    /**
-     * Buffer for transferring data over UART.
-     * @tparam C capacity of buffer
-     */
+    /// @param Buffer for transferring data over UART.
+    /// @tparam C capacity of buffer
     template <int C>
     class Buffer : public BufferBase {
     public:
-        Buffer(Uart_UARTE_TIMER &device) : BufferBase(data, C, device) {}
+        Buffer(Uart_UARTE_TIMER &device) : BufferBase(data_, C, device) {}
 
     protected:
-        alignas(4) uint8_t data[C];
+        alignas(4) uint8_t data_[C];
     };
 
-    /**
-     * UART interrupt handler, needs to be called from UART interrupt handler (UARTE0_UART0_IRQHandler() or UARTE1_IRQHandler())
-     */
+    /// @brief UART interrupt handler, needs to be called from UART interrupt handler (UARTE0_UART0_IRQHandler() or UARTE1_IRQHandler())
+    ///
     void UARTE_IRQHandler();
 
 protected:
-    Loop_Queue &loop;
-    int baudRate;
+    Loop_Queue &loop_;
+    int baudRate_;
 
     // uart
-    NRF_UARTE_Type *uart;
-    int uartIrq;
+    UartInfo::Instance uart_;
+    int uartIrq_;
 
     // timer
-    NRF_TIMER_Type *timer;
-    int ppiFlags;
-
-    // device state
-    //StateTasks<State, Events> st = State::READY;
+    NRF_TIMER_Type *timer_;
+    int ppiFlags_;
 
     // list of buffers
-    IntrusiveList<BufferBase> buffers;
+    IntrusiveList<BufferBase> buffers_;
 
     // list of active transfers
-    InterruptQueue<BufferBase> receiveTransfers;
-    InterruptQueue<BufferBase> sendTransfers;
+    InterruptQueue<BufferBase> receiveTransfers_;
+    InterruptQueue<BufferBase> sendTransfers_;
+
+    // new baud rate value to be applied when no TX transfer is in progress
+    int newBaudRate_ = 0;
 };
 
 } // namespace coco

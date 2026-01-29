@@ -1,4 +1,4 @@
-#include <UartSendTest.hpp>
+#include <UartTest.hpp>
 #include <coco/Loop.hpp>
 #include <coco/debug.hpp>
 #include <coco/BufferWriter.hpp>

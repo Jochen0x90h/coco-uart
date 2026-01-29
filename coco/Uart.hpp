@@ -14,18 +14,13 @@
 
 namespace coco {
 
-/**
- * Asynchronous receiver/transmitter (UART) abstraction with support for setConfig() method to adjust baud rate,
- * parity etc. on the fly.
- * Microcontroller implementations can directly inherit from BufferDevice if configure() is not supported.
- */
+/// @brief Asynchronous receiver/transmitter (UART) abstraction.
+/// Supports adjustment of baud rate, parity etc.
 class Uart : public BufferDevice {
 public:
-
-    /**
-     * Value IDs. An implementation may support only a subset of the values.
-     * struct Value only serves as a namespace
-     */
+    /// @brief Value IDs.
+    /// An implementation may support only a subset of the values.
+    /// struct Value only serves as a namespace
     struct Value {
         // frame format configuration id
         static constexpr int FORMAT = 0;
@@ -46,9 +41,8 @@ public:
         static constexpr int CHANNEL = 5;
     };
 
-    /**
-     * Frame format
-     */
+    /// @brief Frame format
+    ///
     enum class Format {
         // number of data bits
         DATA_5 = 5,
@@ -77,9 +71,9 @@ public:
         DEFAULT = DATA_8 | PARITY_NONE | STOP_1,
     };
 
-    /**
-     * Modem control line state (is same as usb::PstnControlLineState)
-     */
+    /// @brief Modem control line state
+    /// Note: Is similar to Control Line State of CDC PSTN subclass (6.3.12, Table 18, https://www.usb.org/document-library/class-definitions-communication-devices-12).
+    /// Therefore similar to usb::PstnControlLineState of coco-usb
     enum class OutputSignals {
         NONE = 0,
 
@@ -90,9 +84,9 @@ public:
         RTS = 1 << 1,
     };
 
-    /**
-     * Serial State (is same as usb::PstnSerialState except for CTS)
-     */
+    /// @brief Serial State
+    /// Note: Is similar to Serial State of CDC PSTN subclass (6.5.4, Table 31, https://www.usb.org/document-library/class-definitions-communication-devices-12).
+    /// Therefore similar to usb::cdc::PstnSerialState of coco-usb except for CTS
     enum class InputSignals {
         NONE = 0,
 
@@ -117,50 +111,51 @@ public:
 
     Uart(State state) : BufferDevice(state) {}
 
-    /**
-     * Set a configuration or state value.
-     * @param id id of value to change, either pre-defined or implementation specific
-     * @param value value to set
-     */
+    /// @brief Set a configuration or state value.
+    /// @param id id of value to change, either pre-defined or implementation specific
+    /// @param value value to set
     virtual void setValue(int id, int value) = 0;
 
-    /// Set the current baud rate
+    /// @brief Set the current baud rate
+    ///
     void setBaudRate(int baudRate) {setValue(Value::BAUD, baudRate);}
 
-    /// Set the current frame format
+    /// @brief Set the current frame format
+    ///
     void setFormat(Format format) {setValue(Value::FORMAT, int(format));}
 
-    /// Set the current RX timeout in bit times
+    /// @brief Set the current RX timeout in bit times
+    ///
     void setRxTimeout(int timeout) {setValue(Value::RX_TIMEOUT, timeout);}
 
-    /// Set the output signals
+    /// @brief Set the output signals
+    ///
     void setOutputSignals(OutputSignals signals) {setValue(Value::OUTPUT_SIGNALS, int(signals));}
 
-    /// Set the communication channel index
+    /// @brief Set the communication channel index
+    ///
     void setChannel(int index) {setValue(Value::CHANNEL, index);}
 
-    /**
-     * Get a configuration or state value.
-     * @param id id of value to get, either pre-defined or implementation specific
-     * @returns value for given id
-     */
+    /// @brief Get a configuration or state value.
+    /// @param id id of value to get, either pre-defined or implementation specific
+    /// @returns value for given id
     virtual int getValue(int id) = 0;
 
-    /// Get the current baud rate
+    /// @brief Get the current baud rate
+    ///
     int getBaudRate() {return getValue(Value::BAUD);}
 
-    /// Get the current frame format
+    /// @brief Get the current frame format
+    ///
     Format getFormat() {return Format(getValue(Value::FORMAT));}
 
-    /// Get the state of the input signals. Use co_await uart.untilNewSignals(); to wait for a state change
+    /// @brief Get the state of the input signals. Use co_await uart.untilNewSignals(); to wait for a state change
+    ///
     InputSignals getInputSignals() {return InputSignals(getValue(Value::INPUT_SIGNALS));}
 
-    /**
-     * Wait until control signals changed (e.g. DCD for serial or volgate level for USB PD)
-     * @return use co_await on return value to wait until the control signals change
-     */
+    /// @brief Wait until input control signals changed (e.g. InputSignals::DSR or InputSignals::RI)
+    /// @return use co_await on return value to wait until the input control signals change
     [[nodiscard]] Awaitable<Events> untilSignalsChanged() {
-        //auto &st = getStateTasks();
         return {this->st.tasks, Events::SIGNALS_CHANGED};
     }
 

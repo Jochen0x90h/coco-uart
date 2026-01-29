@@ -8,7 +8,8 @@ using namespace coco;
 
 
 
-// drivers for UartTest
+/// @brief Drivers for UartSendTest
+///
 struct Drivers {
     Loop_native loop;
 

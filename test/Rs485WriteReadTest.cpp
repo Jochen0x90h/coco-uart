@@ -10,7 +10,7 @@
 /*
     This test periodically sends "Hello UART" and waits for a reply. Needs two connected serial ports.
     For two RS485 ports, simply connect A and B of both ports.
-    On embedded platforms, connect TX 1 to RX 2 and TX 2 to TX 1. The green LED toggles every half second if everything is ok.
+    On embedded platforms, connect TX 1 to RX 2 and TX 2 to RX 1. The green LED toggles every half second if everything is ok.
 */
 
 using namespace coco;

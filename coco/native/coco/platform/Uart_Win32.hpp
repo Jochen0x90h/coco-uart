@@ -1,51 +1,45 @@
-#include <coco/Uart.hpp>
 #include <coco/platform/Loop_Win32.hpp> // includes Windows.h
+#include <coco/Uart.hpp> // #undef PARITY_xxx
 
 
 namespace coco {
 
-/**
- * Implementation of Uart interface on Win32 using IO completion ports
- */
+/// @brief Implementation of Uart interface on Win32 using IO completion ports.
+///
 class Uart_Win32 : public Uart, public Loop_Win32::CompletionHandler {
 public:
-    /**
-     * Constructor
-     * @param loop event loop
-     * @param baudRate baud rate (e.g. 38400)
-     * @param format frame format
-     * @param rxTimeout receiver timeout in milliseconds, at least ~20ms (note that setRxTimeout() is in bit times)
-     */
+    /// @brief Constructor/
+    /// @param loop event loop
+    /// @param baudRate baud rate (e.g. 38400)
+    /// @param format frame format
+    /// @param rxTimeout receiver timeout in milliseconds, at least ~20ms (note that setRxTimeout() is in bit times)
     Uart_Win32(Loop_Win32 &loop)
         : Uart(State::DISABLED)
-        , loop(loop) {}
+        , loop_(loop) {}
 
     ~Uart_Win32() override;
 
-    class Buffer;
-
-    // Device methods
-    //StateTasks<const State, Events> &getStateTasks() override;
-    void close() override;
-
-    // BufferDevice methods
-    int getBufferCount() override;
-    Buffer &getBuffer(int index) override;
+    /// @brief Open device by name.
+    /// Fails if already open. Calling close() is ok if the uart is not open.
+    /// @param name device name
+    /// @return ture if successful
+    bool open(String name, Format format, int baudRate, Milliseconds<> rxTimeout);
 
     // Uart methods
     void setValue(int id, int value) override;
     int getValue(int id) override;
 
-    /**
-     * Open device by name
-     * @param name device name
-     */
-    bool open(String name, Format format, int baudRate, Milliseconds<> rxTimeout);
+    // BufferDevice methods
+    class Buffer;
+    int getBufferCount() override;
+    Buffer &getBuffer(int index) override;
+
+    // Device methods
+    void close() override;
 
 
-    /**
-     * Buffer for transferring data to/from a UART device (COM port)
-     */
+    /// @brief Buffer for transferring data to/from a UART device (COM port)
+    ///
     class Buffer : public coco::Buffer, public IntrusiveListNode {
         friend class Uart_Win32;
     public:
@@ -59,30 +53,26 @@ public:
     protected:
         void handle(OVERLAPPED *overlapped);
 
-        Uart_Win32 &device;
-
-        Op op;
-        OVERLAPPED overlapped;
+        Uart_Win32 &device_;
+        Op op_;
+        OVERLAPPED overlapped_;
     };
 
 protected:
     void handle(OVERLAPPED *overlapped) override;
 
-    Loop_Win32 &loop;
-    int baudRate = 0;
+    Loop_Win32 &loop_;
+    int baudRate_ = 0;
 
     // file handle
-    HANDLE file = INVALID_HANDLE_VALUE;
+    HANDLE file_ = INVALID_HANDLE_VALUE;
 
     // overlapped for monitoring events (e.g. change of DSR signal)
-    OVERLAPPED overlapped;
-    ULONG mask;
-
-    // device state
-    //StateTasks<State, Events> st = State::DISABLED;
+    OVERLAPPED overlapped_;
+    ULONG mask_;
 
     // list of buffers
-    IntrusiveList<Buffer> buffers;
+    IntrusiveList<Buffer> buffers_;
 };
 
 
