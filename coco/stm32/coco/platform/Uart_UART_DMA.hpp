@@ -105,14 +105,13 @@ public:
         ~BufferBase() override;
 
         // Buffer methods
-        bool start(Op op) override;
+        bool start() override;
         bool cancel() override;
 
     protected:
         void handle() override;
 
         Uart_UART_DMA &device_;
-        Op op_;
     };
 
     /// @brief Buffer for transferring data over UART.

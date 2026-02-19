@@ -14,11 +14,20 @@ if(${PLATFORM} STREQUAL "native" OR ${PLATFORM} STREQUAL "emu")
             native/coco/platform/Uart_native.hpp
     )
     if(WIN32)
+        # IOCP
         target_sources(${PROJECT_NAME}
             PUBLIC FILE_SET platform_headers FILES
                 native/coco/platform/Uart_Win32.hpp
             PRIVATE
                 native/coco/platform/Uart_Win32.cpp
+        )
+    elseif(LINUX)
+        # io_uring
+        target_sources(${PROJECT_NAME}
+            PUBLIC FILE_SET platform_headers FILES
+                native/coco/platform/Uart_io_uring.hpp
+            PRIVATE
+                native/coco/platform/Uart_io_uring.cpp
         )
     endif()
 elseif(${PLATFORM} MATCHES "^nrf52")

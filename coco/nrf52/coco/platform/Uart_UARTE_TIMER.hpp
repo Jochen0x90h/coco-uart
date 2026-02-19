@@ -65,7 +65,7 @@ public:
         ~BufferBase() override;
 
         // Device methods
-        bool start(Op op) override;
+        bool start() override;
         bool cancel() override;
 
     protected:
@@ -74,7 +74,7 @@ public:
         void handle() override;
 
         Uart_UARTE_TIMER &device_;
-        Op op_;
+        //Op op_;
     };
 
     /// @param Buffer for transferring data over UART.

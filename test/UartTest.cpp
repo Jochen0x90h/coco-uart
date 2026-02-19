@@ -27,9 +27,8 @@ Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
         //uart.setOutputSignals(Uart::OutputSignals::DTR | Uart::OutputSignals::RTS);
 
         debug::out << "Send\n";
-#ifndef NATIVE
         debug::toggleBlue();
-#endif
+
         co_await buffer.write("Hello UART");
         co_await loop.sleep(500ms);
 
@@ -55,7 +54,7 @@ Coroutine receive(Loop &loop, Buffer &buffer) {
         if (r == 1) {
             // output received string to debug console
             debug::out << buffer.string() << '\n';
-#ifndef NATIVE
+
             if (buffer.string() == "Hello UART") {
                 // ok
                 debug::toggleGreen();
@@ -65,13 +64,10 @@ Coroutine receive(Loop &loop, Buffer &buffer) {
                 debug::toggleRed();
                 debug::out << "Error (size " << dec(buffer.size()) << ")\n";
             }
-#endif
         } else {
             // timeout
             debug::out << "Error: Timeout\n";
-#ifndef NATIVE
             debug::toggleRed();
-#endif
             buffer.cancel();
             co_await buffer.untilReadyOrDisabled();
         }
@@ -114,8 +110,8 @@ int main() {
 #endif
     debug::out << "UartTest\n";
 
-    send(drivers.loop, drivers.uart, drivers.sendBuffer);
     receive(drivers.loop, drivers.receiveBuffer);
+    send(drivers.loop, drivers.uart, drivers.sendBuffer);
     detect(drivers.loop, drivers.uart);
 
     drivers.loop.run();

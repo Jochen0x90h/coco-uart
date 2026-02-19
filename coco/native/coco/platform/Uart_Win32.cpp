@@ -1,7 +1,8 @@
-#define NOMINMAX
+#include <coco/platform/WindowsDef.hpp>
 #include <Windows.h>
-#include <ioapiset.h>
+#include <winioctl.h>
 #include <ntddser.h>
+#include <coco/platform/WindowsUndef.hpp>
 
 #include "Uart_Win32.hpp"
 #include <coco/bits.hpp>
@@ -19,7 +20,7 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
     if (file_ != INVALID_HANDLE_VALUE)
         return false;
 
-    // open file using Win32
+    // open file
     std::filesystem::path path(std::u8string_view(reinterpret_cast<const char8_t *>(name.data()), name.size()));
     HANDLE file = CreateFileW(path.c_str(),
         GENERIC_READ | GENERIC_WRITE,
@@ -29,7 +30,8 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
         FILE_FLAG_OVERLAPPED,
         nullptr);
     if (file == INVALID_HANDLE_VALUE) {
-        //int e = WSAGetLastError();
+        int error = GetLastError();
+        setSystemError(error);
         return false;
     }
 
@@ -41,11 +43,13 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
         ULONG_PTR(handler),
         0) == nullptr)
     {
-        //int e = WSAGetLastError();
+        int error = GetLastError();
+        setSystemError(error);
         CloseHandle(file);
         return false;
     }
     file_ = file;
+    setSuccess();
 
     // configure
     setFormat(format);
@@ -62,15 +66,16 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
 
 
     // set state
-    st.set(State::READY);
+    state_ = State::READY;
 
     // enable buffers
     for (auto &buffer : buffers_) {
-        buffer.setReady(0);
+        buffer.setSuccess(0);
+        buffer.setReady();
     }
 
     // resume all coroutines waiting for state change
-    st.notify(Events::ENTER_OPENING | Events::ENTER_READY);
+    notify(Events::ENTER_OPENING | Events::ENTER_READY);
 
     // set wait mask
     ULONG value = SERIAL_EV_RLSD | SERIAL_EV_DSR | SERIAL_EV_RING | SERIAL_EV_CTS;
@@ -106,12 +111,13 @@ void Uart_Win32::setValue(int id, int value) {
     switch (id) {
     case Value::FORMAT:
         {
-            DCB dcb;
-            dcb.DCBlength = sizeof(dcb);
-            GetCommState(file_, &dcb);
             int dataBits = extract(value, int(Format::DATA_MASK));
             int parity = extract(value, int(Format::PARITY_MASK));
             int stopBits = extract(value, int(Format::STOP_MASK));
+
+            DCB dcb;
+            dcb.DCBlength = sizeof(dcb);
+            GetCommState(file_, &dcb);
             dcb.ByteSize = dataBits;
             dcb.fParity = parity == 0 ? 0 : 1;
             dcb.Parity = parity;
@@ -124,6 +130,7 @@ void Uart_Win32::setValue(int id, int value) {
     case Value::BAUD:
         {
             baudRate_ = value;
+
             DCB dcb;
             dcb.DCBlength = sizeof(dcb);
             GetCommState(file_, &dcb);
@@ -133,6 +140,7 @@ void Uart_Win32::setValue(int id, int value) {
         break;
     case Value::RX_TIMEOUT:
         {
+            // calc timeout in milliseconds
             int rxTimeout = std::max(value * 1000 / baudRate_ + 1, 20);
 
             // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcommtimeouts
@@ -150,9 +158,9 @@ void Uart_Win32::setValue(int id, int value) {
         {
             bool dtr = (OutputSignals(value) & OutputSignals::DTR) != 0;
             bool rts = (OutputSignals(value) & OutputSignals::RTS) != 0;
-            DWORD transferred;
 
             // RTS needs to be send first because of a bug in usbser.sys (https://answers.microsoft.com/en-us/windows/forum/all/usbsersys-does-not-handle-rts-signal-correctly/e348047e-dacd-47d5-8e74-1fd2f275bebb)
+            DWORD transferred;
             DeviceIoControl(file_,
                 rts ? IOCTL_SERIAL_SET_RTS : IOCTL_SERIAL_CLR_RTS,
                 nullptr, 0, // input buffer
@@ -217,9 +225,10 @@ void Uart_Win32::close() {
     // close file
     CloseHandle(file_);
     file_ = INVALID_HANDLE_VALUE;
+    setSuccess();
 
     // set state
-    st.set(State::DISABLED);
+    state_ = State::DISABLED;
 
     // disable buffers
     for (auto &buffer : buffers_) {
@@ -227,7 +236,7 @@ void Uart_Win32::close() {
     }
 
     // resume all coroutines waiting for state change
-    st.notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
+    notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
 void Uart_Win32::handle(OVERLAPPED *overlapped) {
@@ -240,13 +249,17 @@ void Uart_Win32::handle(OVERLAPPED *overlapped) {
     if (overlapped = &overlapped_) {
         DWORD transferred;
         auto result = GetOverlappedResult(file_, overlapped, &transferred, false);
-        if (!result) {
-            auto error = GetLastError();
-            int x = 0;
+        if (result) {
+            // success
+            setSuccess();
         } else {
-            // resume all coroutines waiting for state change
-            st.notify(Events::SIGNALS_CHANGED);
+            // error
+            auto error = GetLastError();
+            setSystemError(error);
         }
+
+        // resume all coroutines waiting for state change
+        notify(Events::SIGNALS_CHANGED);
 
         // wait for events again
         DeviceIoControl(file_,
@@ -262,7 +275,7 @@ void Uart_Win32::handle(OVERLAPPED *overlapped) {
 // Buffer
 
 Uart_Win32::Buffer::Buffer(Uart_Win32 &device, int size)
-    : coco::Buffer(new uint8_t[size], size, device.st.state)
+    : coco::Buffer(new uint8_t[size], size, device.state_)
     , device_(device)
 {
     device.buffers_.add(*this);
@@ -272,35 +285,33 @@ Uart_Win32::Buffer::~Buffer() {
     delete [] data_;
 }
 
-bool Uart_Win32::Buffer::start(Op op) {
-    if (st.state != State::READY) {
-        assert(st.state != State::BUSY);
+bool Uart_Win32::Buffer::start() {
+    if (state_ != State::READY || (op_ & Op::READ_WRITE) == 0 || size_ == 0) {
+        assert(state_ != State::BUSY);
+        setSuccess(0);
         return false;
     }
-
-    // check if READ or WRITE flag is set
-    assert((op & Op::READ_WRITE) != 0);
 
     // initialize overlapped
     memset(&overlapped_, 0, sizeof(OVERLAPPED));
 
+    flags_ = int(op_ & Op::READ_WRITE);
+
     // get data and size to read/write
     int result;
-    if ((op & Op::WRITE) == 0) {
+    if ((op_ & Op::WRITE) == 0) {
         // read
-        op_ = Op::NONE;
         result = ReadFile(device_.file_, data_, capacity_, nullptr, &overlapped_);
     } else {
         // write
-        op_ = op;
         result = WriteFile(device_.file_, data_, size_, nullptr, &overlapped_);
     }
 
-    if (result == 0) {
+    if (!result) {
         int error = GetLastError();
         if (error != ERROR_IO_PENDING) {
-            // "real" error
-            setReady(0);
+            // error
+            setSystemError(error);
             return false;
         }
     }
@@ -312,13 +323,20 @@ bool Uart_Win32::Buffer::start(Op op) {
 }
 
 bool Uart_Win32::Buffer::cancel() {
-    if (st.state != State::BUSY)
+    if (state_ != State::BUSY)
         return false;
 
-    auto result = CancelIoEx(device_.file_, &overlapped_);
-    if (!result) {
-        auto e = GetLastError();
-        std::cerr << "cancel error " << e << std::endl;
+    if (flags_ != 0) {
+        auto result = CancelIoEx(device_.file_, &overlapped_);
+        if (!result) {
+            int error = GetLastError();
+            setSystemError(error);
+            //std::cerr << "cancel error " << e << std::endl;
+            return false;
+        }
+
+        // clear pending read/write operations
+        flags_ = 0;
     }
     return true;
 }
@@ -326,24 +344,42 @@ bool Uart_Win32::Buffer::cancel() {
 void Uart_Win32::Buffer::handle(OVERLAPPED *overlapped) {
     DWORD transferred;
     auto result = GetOverlappedResult(device_.file_, overlapped, &transferred, false);
-    if (!result) {
-        // "real" error or cancelled (ERROR_OPERATION_ABORTED): return zero size
-        auto error = GetLastError();
-        //transferred = 0;
-
-        // transfer finished
-        setReady(0);
-    } else {
-        // transfer OK
-        if ((op_ & Op::READ) != 0) {
+    if (result) {
+        // success
+        if (flags_ == int(Op::READ_WRITE)) {
             // read after write
-            op_ = Op::NONE;
+            flags_ = int(Op::READ);
+
+            // initialize overlapped
+            memset(&overlapped_, 0, sizeof(OVERLAPPED));
+
+            // read
             result = ReadFile(device_.file_, data_, capacity_, nullptr, &overlapped_);
+            if (!result) {
+                int error = GetLastError();
+                if (error != ERROR_IO_PENDING) {
+                    // error
+                    setSystemError(error);
+                } else {
+                    // -> handle()
+                    return;
+                }
+            } else {
+                // -> handle()
+                return;
+            }
         } else {
-            // transfer finished
-            setReady(transferred);
+            setSuccess(transferred);
         }
+    } else {
+        // error
+        // ERROR_OPERATION_ABORTED: cancelled
+        auto error = GetLastError();
+        setSystemError(error);
     }
+
+    // transfer finished
+    setReady();
 }
 
 } // namespace coco

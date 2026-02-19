@@ -146,7 +146,10 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
 
         receiveTransfers_.pop(
             [this, uart](BufferBase &buffer) {
-                buffer.size_ = uart->RXD.AMOUNT;
+                if (buffer.flags_ == 0)
+                    buffer.setError(std::errc::operation_canceled);
+                else
+                    buffer.setSuccess(uart->RXD.AMOUNT);
                 loop_.push(buffer);
                 return true;
             },
@@ -163,16 +166,22 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         uart->EVENTS_ENDTX = 0;
 
         int result = sendTransfers_.pop(
-            [this](BufferBase &buffer) {
-                if ((buffer.op_ & BufferBase::Op::READ) != 0) {
+            [this, uart](BufferBase &buffer) {
+                if ((buffer.flags_ & int(BufferBase::Op::READ)) != 0) {
                     // read after write
-                    buffer.op_ &= ~BufferBase::Op::WRITE;
+
+                    // update flags for cancel()
+                    buffer.flags_ = int(BufferBase::Op::READ);
 
                     // add to list of pending receive transfers and start immediately if list was empty
                     if (receiveTransfers_.push(buffer))
                         buffer.startRx();
                 } else {
+                    // update flags for cancel()
+                    buffer.flags_ = 0;
+
                     // pass buffer to event loop so that application gets notified
+                    buffer.setSuccess();
                     loop_.push(buffer);
                 }
                 return true;
@@ -201,18 +210,18 @@ Uart_UARTE_TIMER::BufferBase::BufferBase(uint8_t *data, int capacity, Uart_UARTE
 Uart_UARTE_TIMER::BufferBase::~BufferBase() {
 }
 
-bool Uart_UARTE_TIMER::BufferBase::start(Op op) {
-    if (st.state != State::READY) {
-        assert(st.state != State::BUSY);
+bool Uart_UARTE_TIMER::BufferBase::start() {
+    if (state_ != State::READY || (op_ & Op::READ_WRITE) == 0 || size_ == 0) {
+        // starting a buffer when the state is BUSY is a bug
+        assert(state_ != State::BUSY);
+        setSuccess(0);
         return false;
     }
-
-    // check if READ or WRITE flag is set
-    assert((op & Op::READ_WRITE) != 0);
-
-    op_ = op;
     auto &device = device_;
-    if ((op & Op::WRITE) == 0) {
+
+    flags_ = int(op_ & Op::READ_WRITE);
+
+    if ((op_ & Op::WRITE) == 0) {
         // read
 
         // add to list of pending transfers and start immediately if list was empty
@@ -233,35 +242,44 @@ bool Uart_UARTE_TIMER::BufferBase::start(Op op) {
 }
 
 bool Uart_UARTE_TIMER::BufferBase::cancel() {
-    if (st.state != State::BUSY)
+    if (state_ != State::BUSY)
         return false;
     auto &device = device_;
 
-    if ((op_ & Op::WRITE) != 0) {
-        // write
+    bool canceled = false;
+    {
+        nvic::Guard guard(device.uartIrq_);
+        if ((flags_ & int(Op::WRITE)) != 0) {
+            // write: buffer is in sendTransfers_ list
 
-        // remove read flag in case there is a read after write
-        op_ &= ~Op::READ;
+            // remove from pending transfers if not in progress (first in list), otherwise complete normally
+            if (device.sendTransfers_.remove(*this, false) == 1) {
+                canceled = true;
+            }
+        } else if ((flags_ & int(Op::READ)) != 0) {
+            // read: buffer is in receiveTransfers_ list
 
-        // remove from pending transfers if not yet started, otherwise complete normally
-        if (device.sendTransfers_.remove(nvic::Guard(device.uartIrq_), *this, false)) {
-            // cancel succeeded: set buffer ready again
-            // resume application code, therefore interrupt should be enabled at this point
-            setReady(0);
+            // remove from pending transfers if not in progress (first in list), otherwise check if something was received
+            if (device.receiveTransfers_.remove(*this, false) == 1) {
+                canceled = true;
+            } else if (!device.uart_->EVENTS_RXDRDY) {
+                // haven't received anything yet: stop
+                device.uart_.stopRx();
+
+                // -> EVENTS_ENDRX
+            }
         }
-    } else {
-        // read
 
-        // remove from pending transfers if not yet started or nothing received yet, otherwise complete normally
-        if (device.receiveTransfers_.remove(nvic::Guard(device.uartIrq_), *this, false)) {
-            // cancel succeeded: set buffer ready again
-            // resume application code, therefore interrupt should be enabled at this point
-            setReady(0);
-        } else if (!device.uart_->EVENTS_RXDRDY) {
-            // haven't received anything yet: stop
-            device.uart_.stopRx();//->TASKS_STOPRX = TRIGGER;
-        }
+        // clear pending read/write operations
+        flags_ = 0;
     }
+
+    if (canceled) {
+        // cancel succeeded: set buffer ready again and resume application code waiting for ready state
+        setError(std::errc::operation_canceled);
+        setReady();
+    }
+
     return true;
 }
 

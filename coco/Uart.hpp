@@ -6,12 +6,6 @@
 #include <cstdint>
 
 
-#undef PARITY_NONE
-#undef PARITY_ODD
-#undef PARITY_EVEN
-#undef PARITY_MARK
-#undef PARITY_SPACE
-
 namespace coco {
 
 /// @brief Asynchronous receiver/transmitter (UART) abstraction.
@@ -156,7 +150,7 @@ public:
     /// @brief Wait until input control signals changed (e.g. InputSignals::DSR or InputSignals::RI)
     /// @return use co_await on return value to wait until the input control signals change
     [[nodiscard]] Awaitable<Events> untilSignalsChanged() {
-        return {this->st.tasks, Events::SIGNALS_CHANGED};
+        return {this->tasks_, Events::SIGNALS_CHANGED};
     }
 
 

@@ -215,7 +215,7 @@ void Uart_UART_DMA::handleRx() {
     receiveTransfers_.pop(
         [this](BufferBase &buffer) {
             // buffer size is number of received bytes
-            buffer.size_ = buffer.capacity_ - rxChannel_.count();
+            buffer.setSuccess(buffer.capacity_ - rxChannel_.count());
 
             // inform application that receive is finished
             loop_.push(buffer);
@@ -244,15 +244,21 @@ void Uart_UART_DMA::handleTx() {
             // notify derived class that TX has ended
             endTx();
 
-            if ((buffer.op_ & BufferBase::Op::READ) != 0) {
+            if ((buffer.flags_ & int(BufferBase::Op::READ)) != 0) {
                 // read after write
-                buffer.op_ &= ~BufferBase::Op::WRITE;
+
+                // update flags for cancel()
+                buffer.flags_ = int(BufferBase::Op::READ);
 
                 // add to list of pending receive transfers and start immediately if list was empty
                 if (receiveTransfers_.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
                     startRx(buffer);
             } else {
+                // update flags for cancel()
+                buffer.flags_ = 0;
+
                 // pass buffer to event loop so that application gets notified
+                buffer.setSuccess();
                 loop_.push(buffer);
             }
             return true;
@@ -280,16 +286,18 @@ Uart_UART_DMA::BufferBase::BufferBase(uint8_t *data, int capacity, Uart_UART_DMA
 Uart_UART_DMA::BufferBase::~BufferBase() {
 }
 
-bool Uart_UART_DMA::BufferBase::start(Op op) {
-    if (st.state != State::READY || (op & Op::READ_WRITE) == 0 || size_ == 0) {
+bool Uart_UART_DMA::BufferBase::start() {
+    if (state_ != State::READY || (op_ & Op::READ_WRITE) == 0 || size_ == 0) {
         // starting a buffer when the state is BUSY is a bug
-        assert(st.state != State::BUSY);
+        assert(state_ != State::BUSY);
+        setSuccess(0);
         return false;
     }
-
-    op_ = op;
     auto &device = device_;
-    if ((op & Op::WRITE) == 0) {
+
+    flags_ = int(op_ & Op::READ_WRITE);
+
+    if ((op_ & Op::WRITE) == 0) {
         // read
         nvic::Guard2 gurad(device.uartIrq_, device.rxDmaIrq_);
 
@@ -311,71 +319,62 @@ bool Uart_UART_DMA::BufferBase::start(Op op) {
 }
 
 bool Uart_UART_DMA::BufferBase::cancel() {
-    if (st.state != State::BUSY)
+    if (state_ != State::BUSY)
         return false;
-
-    //return device.cancel(*this);
     auto &device = device_;
 
-    if ((op_ & Op::WRITE) != 0) {
-        // write
-
-        // remove read flag in case there is a read after write
-        op_ &= ~Op::READ;
-
-        bool cancelled = false;
-        {
-            nvic::Guard2 guard(device.uartIrq_, device.rxDmaIrq_);
+    bool canceled = false;
+    {
+        nvic::Guard2 guard(device.uartIrq_, device.rxDmaIrq_);
+        if ((flags_ & int(Op::WRITE)) != 0) {
+            // write: buffer is in sendTransfers_ list
 
             // remove from pending transfers if not yet started, otherwise complete normally
-            if (device.sendTransfers_.remove(*this, false)) {
-                device.endTx();
-                cancelled = true;
+            if (device.sendTransfers_.remove(*this, false) == 1) {
+                //device.endTx();
+                canceled = true;
             }
-        }
-        if (cancelled)
-            setReady(0);
-/*
-        // remove from pending transfers if not yet started, otherwise complete normally
-        if (device.sendTransfers.remove(nvic::Guard(device.uartIrq), *this, false)) {
-            // cancel succeeded: set buffer ready again
-            // resume application code, therefore interrupt should be enabled at this point
-            setReady(0);
-        }
-*/
-    } else {
-        // read
+        } else if ((flags_ & int(Op::READ)) != 0) {
+            // read: buffer is in receiveTransfers_ list
 
-        // remove this buffer from pending transfers if not yet started or nothing received yet, otherwise complete normally
-        if (device.receiveTransfers_.remove(nvic::Guard2(device.uartIrq_, device.rxDmaIrq_), *this,
-            [&device](BufferBase &buffer) {
-                // check if we are still waiting for the first character
-                if (device.rxChannel_.count() == int(buffer.capacity_)) {
-                    // disable rx and DMA
-                    device.uart_
-                        .stopRx()
-                        .clear(uart::Status::RX_TIMEOUT);
-                    device.rxChannel_
-                        .disable()
-                        .clear(dma::Status::TRANSFER_COMPLETE);
-                    nvic::clear(device.uartIrq_);
-                    nvic::clear(device.rxDmaIrq_);
-
-                    return true;
+            // remove this buffer from pending transfers if not yet started or nothing received yet, otherwise complete normally
+            if (device.receiveTransfers_.remove(*this,
+                [&device](BufferBase &buffer) {
+                    // check if we are still waiting for the first character
+                    if (device.rxChannel_.count() == int(buffer.capacity_)) {
+                        // disable rx and DMA
+                        device.uart_
+                            .stopRx()
+                            .clear(uart::Status::RX_TIMEOUT);
+                        device.rxChannel_
+                            .disable()
+                            .clear(dma::Status::TRANSFER_COMPLETE);
+                        nvic::clear(device.uartIrq_);
+                        nvic::clear(device.rxDmaIrq_);
+                        return true;
+                    }
+                    return false;
+                },
+                [&device](BufferBase &next) {
+                    // start next buffer if the first buffer was removed
+                    device.startRx(next);
                 }
-                return false;
-            },
-            [&device](BufferBase &next) {
-                // start next buffer if the first buffer was removed
-                device.startRx(next);
+                ) == 1)
+            {
+                canceled = true;
             }
-            ))
-        {
-            // cancel succeeded: set buffer ready again
-            // resume application code, therefore interrupt should be enabled at this point
-            setReady(0);
         }
+
+        // clear pending read/write operations
+        flags_ = 0;
     }
+
+    if (canceled) {
+        // cancel succeeded: set buffer ready again and resume application code waiting for ready state
+        setError(std::errc::operation_canceled);
+        setReady();
+    }
+
     return true;
 }
 

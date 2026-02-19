@@ -1,23 +1,23 @@
-#include <coco/platform/Loop_native.hpp> // includes Windows.h, #undef PARITY_xxx
-#include <coco/Uart.hpp>
+#include <coco/platform/Loop_Win32.hpp> // includes Windows.h
+#include <coco/Uart.hpp> // #undef PARITY_xxx
 
 
 namespace coco {
 
-/// @brief UART implementation using IO completion ports on Windows.
+/// @brief UART implementation using io_uring on Windows.
 ///
-class Uart_Win32 : public Uart, public Loop_Win32::CompletionHandler {
+class Uart_io_uring : public Uart {
 public:
     /// @brief Constructor/
     /// @param loop event loop
     /// @param baudRate baud rate (e.g. 38400)
     /// @param format frame format
     /// @param rxTimeout receiver timeout in milliseconds, at least ~20ms (note that setRxTimeout() is in bit times)
-    Uart_Win32(Loop_Win32 &loop)
+    Uart_io_uring(Loop_io_uring &loop)
         : Uart(State::DISABLED)
         , loop_(loop) {}
 
-    ~Uart_Win32() override;
+    ~Uart_io_uring() override;
 
     /// @brief Open device by name.
     /// Fails if already open. Calling close() is ok if the uart is not open.
@@ -41,9 +41,9 @@ public:
     /// @brief Buffer for transferring data to/from a UART device (COM port)
     ///
     class Buffer : public coco::Buffer, public IntrusiveListNode {
-        friend class Uart_Win32;
+        friend class Uart_io_uring;
     public:
-        Buffer(Uart_Win32 &device, int size);
+        Buffer(Uart_io_uring &device, int size);
         ~Buffer() override;
 
         // Device methods
@@ -51,24 +51,18 @@ public:
         bool cancel() override;
 
     protected:
-        void handle(OVERLAPPED *overlapped);
+        void handle(io_uring_cqe &cqe);
 
-        Uart_Win32 &device_;
-        OVERLAPPED overlapped_;
+        Uart_io_uring &device_;
     };
 
 protected:
-    void handle(OVERLAPPED *overlapped) override;
-
-    Loop_Win32 &loop_;
+    Loop_io_uring &loop_;
     int baudRate_ = 0;
 
     // file handle
-    HANDLE file_ = INVALID_HANDLE_VALUE;
-
-    // overlapped for monitoring events (e.g. change of DSR signal)
-    OVERLAPPED overlapped_;
-    ULONG mask_;
+    static constexpr int INVALID_HANDLE_VALUE = -1;
+    int file_ = INVALID_HANDLE_VALUE;
 
     // list of buffers
     IntrusiveList<Buffer> buffers_;
