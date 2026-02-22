@@ -272,7 +272,7 @@ void Uart_Win32::handle(OVERLAPPED *overlapped) {
 }
 
 
-// Buffer
+// Uart_Win32::Buffer
 
 Uart_Win32::Buffer::Buffer(Uart_Win32 &device, int size)
     : coco::Buffer(new uint8_t[size], size, device.state_)

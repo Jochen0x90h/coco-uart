@@ -1,12 +1,12 @@
-#include <coco/platform/Loop_Win32.hpp> // includes Windows.h
-#include <coco/Uart.hpp> // #undef PARITY_xxx
+#include <coco/platform/Loop_native.hpp>
+#include <coco/Uart.hpp>
 
 
 namespace coco {
 
 /// @brief UART implementation using io_uring on Windows.
 ///
-class Uart_io_uring : public Uart {
+class Uart_io_uring : public Uart, public Loop_io_uring::CompletionHandler {
 public:
     /// @brief Constructor/
     /// @param loop event loop
@@ -40,7 +40,7 @@ public:
 
     /// @brief Buffer for transferring data to/from a UART device (COM port)
     ///
-    class Buffer : public coco::Buffer, public IntrusiveListNode {
+    class Buffer : public coco::Buffer, public Loop_io_uring::CompletionHandler, public IntrusiveListNode {
         friend class Uart_io_uring;
     public:
         Buffer(Uart_io_uring &device, int size);
@@ -57,15 +57,23 @@ public:
     };
 
 protected:
+    void handle(io_uring_cqe &cqe);
+
     Loop_io_uring &loop_;
     int baudRate_ = 0;
 
     // file handle
     static constexpr int INVALID_HANDLE_VALUE = -1;
-    int file_ = INVALID_HANDLE_VALUE;
+    int com_ = INVALID_HANDLE_VALUE;
 
     // list of buffers
     IntrusiveList<Buffer> buffers_;
+
+    // list of active transfers
+    //InterruptQueue<Buffer> receiveTransfers_;
+    //InterruptQueue<Buffer> sendTransfers_;
+
+    //int poll_ = 0;
 };
 
 

@@ -53,7 +53,7 @@ Coroutine receive(Loop &loop, Buffer &buffer) {
         int r = co_await select(buffer.untilReadyOrDisabled(), loop.sleep(2s));
         if (r == 1) {
             // output received string to debug console
-            debug::out << buffer.string() << '\n';
+            debug::out << "Received " << buffer.string();
 
             if (buffer.string() == "Hello UART") {
                 // ok
@@ -62,8 +62,9 @@ Coroutine receive(Loop &loop, Buffer &buffer) {
             } else {
                 // error
                 debug::toggleRed();
-                debug::out << "Error (size " << dec(buffer.size()) << ")\n";
+                debug::out << " (error: size " << dec(buffer.size()) << ")\n";
             }
+            debug::out << '\n';
         } else {
             // timeout
             debug::out << "Error: Timeout\n";

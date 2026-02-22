@@ -2,27 +2,30 @@
 #include <coco/bits.hpp>
 #include <iostream>
 #include <filesystem>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
 
 
 namespace coco {
 
 Uart_io_uring::~Uart_io_uring() {
-    CloseHandle(file_);
+    ::close(com_);
 }
 
 bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<> rxTimeout) {
-    if (file_ != INVALID_HANDLE_VALUE)
+    if (com_ != INVALID_HANDLE_VALUE)
         return false;
 
     // open file
-    std::string n = name;
-    int file = open(n.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-    if (file == INVALID_HANDLE_VALUE) {
+    std::string n(name);
+    int com = ::open(n.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (com == INVALID_HANDLE_VALUE) {
         int error = errno;
         setSystemError(error);
         return false;
     }
-    file_ = file;
+    com_ = com;
     setSuccess();
 
     // configure
@@ -30,7 +33,12 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
     setBaudRate(baudRate);
 
     // set timeouts
-
+    termios tty;
+    tcgetattr(com, &tty);
+    cfmakeraw(&tty);
+    tty.c_cc[VMIN]  = 1;
+    tty.c_cc[VTIME] = 1;
+    tcsetattr(com, TCSANOW, &tty);
 
     // set state
     state_ = State::READY;
@@ -44,6 +52,8 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
     // resume all coroutines waiting for state change
     notify(Events::ENTER_OPENING | Events::ENTER_READY);
 
+    //loop.poll(file, POLLIN | POLLOUT, this);
+
     return true;
 }
 
@@ -56,7 +66,7 @@ void Uart_io_uring::setValue(int id, int value) {
             int stopBits = extract(value, int(Format::STOP_MASK));
 
             termios tty;
-            tcgetattr(file_, &tty);
+            tcgetattr(com_, &tty);
             tty.c_cflag &= ~PARENB;         // No Parity
             tty.c_cflag &= ~CSTOPB;         // 1 Stop bit
             tty.c_cflag &= ~CSIZE;
@@ -67,7 +77,7 @@ void Uart_io_uring::setValue(int id, int value) {
             tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw input
             tty.c_oflag &= ~OPOST;                           // Raw output
             tty.c_iflag &= ~(IXON | IXOFF | IXANY);          // No SW flow control
-            tcsetattr(file_, TCSANOW, &tty)
+            tcsetattr(com_, TCSANOW, &tty);
         }
         break;
     case Value::BAUD:
@@ -75,10 +85,10 @@ void Uart_io_uring::setValue(int id, int value) {
             baudRate_ = value;
 
             termios tty;
-            tcgetattr(file_, &tty);
+            tcgetattr(com_, &tty);
             cfsetospeed(&tty, B115200);
             cfsetispeed(&tty, B115200);
-            tcsetattr(file_, TCSANOW, &tty)
+            tcsetattr(com_, TCSANOW, &tty);
         }
         break;
     case Value::RX_TIMEOUT:
@@ -120,12 +130,12 @@ Uart_io_uring::Buffer &Uart_io_uring::getBuffer(int index) {
 
 // todo: test what happens when buffers are busy when we call close()
 void Uart_io_uring::close() {
-    if (file_ == INVALID_HANDLE_VALUE)
+    if (com_ == INVALID_HANDLE_VALUE)
         return;
 
     // close file
-    ::close(file_);
-    file_ = INVALID_HANDLE_VALUE;
+    ::close(com_);
+    com_ = INVALID_HANDLE_VALUE;
     setSuccess();
 
     // set state
@@ -140,8 +150,12 @@ void Uart_io_uring::close() {
     notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
+void Uart_io_uring::handle(io_uring_cqe &cqe) {
+    
+}
 
-// Buffer
+
+// Uart_io_uring::Buffer
 
 Uart_io_uring::Buffer::Buffer(Uart_io_uring &device, int size)
     : coco::Buffer(new uint8_t[size], size, device.state_)
@@ -163,23 +177,13 @@ bool Uart_io_uring::Buffer::start() {
 
     flags_ = int(op_ & Op::READ_WRITE);
 
-    // get data and size to read/write
-    int result;
-    if ((op_ & Op::WRITE) == 0) {
-        // read
-        result = ReadFile(device_.file_, data_, capacity_, nullptr, &overlapped_);
-    } else {
-        // write
-        result = WriteFile(device_.file_, data_, size_, nullptr, &overlapped_);
-    }
-
-    if (!result) {
-        int error = GetLastError();
-        if (error != ERROR_IO_PENDING) {
-            // error
-            setSystemError(error);
-            return false;
-        }
+    // read/write
+    if (!device_.loop_.transfer((op_ & Op::WRITE) == 0 ? IORING_OP_READ : IORING_OP_WRITE,
+        device_.com_, 0, data_, size_, this))
+    {
+        // error: submit buffer full
+        setError(std::errc::resource_unavailable_try_again);
+        return false;
     }
 
     // set state
@@ -193,15 +197,11 @@ bool Uart_io_uring::Buffer::cancel() {
         return false;
 
     if (flags_ != 0) {
-        auto result = CancelIoEx(device_.file_, &overlapped_);
-        if (!result) {
-            int error = GetLastError();
-            setSystemError(error);
-            //std::cerr << "cancel error " << e << std::endl;
+        if (!device_.loop_.cancel(this)) {
+            // error: submit buffer full
+            setError(std::errc::resource_unavailable_try_again);
             return false;
         }
-
-        // clear pending read/write operations
         flags_ = 0;
     }
     return true;
@@ -216,22 +216,15 @@ void Uart_io_uring::Buffer::handle(io_uring_cqe &cqe) {
             flags_ = int(Op::READ);
 
             // read
-            result = ReadFile(device_.file_, data_, capacity_, nullptr, &overlapped_);
-            if (!result) {
-                int error = GetLastError();
-                if (error != ERROR_IO_PENDING) {
-                    // error
-                    setSystemError(error);
-                } else {
-                    // -> handle()
-                    return;
-                }
+            if (!device_.loop_.transfer(IORING_OP_READ, device_.com_, 0, data_, size_, this)) {
+                // error: submit buffer full
+                setError(std::errc::resource_unavailable_try_again);
             } else {
                 // -> handle()
                 return;
             }
         } else {
-            setSuccess(transferred);
+            setSuccess(result);
         }
     } else {
         // error

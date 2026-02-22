@@ -1,5 +1,6 @@
 #pragma once
 
+#include <coco/debug.hpp>
 #include <coco/platform/Loop_native.hpp>
 #include <coco/platform/Uart_native.hpp>
 
@@ -19,7 +20,8 @@ struct Drivers {
     Uart::Buffer receiveBuffer{uart, 128};
 
     void init(String device) {
-        this->uart.open(device, Uart::Format::DEFAULT, 38400, 20ms);
+        if (!uart.open(device, Uart::Format::DEFAULT, 38400, 20ms))
+            debug::out << "Error: " << uart.error().message() << '\n';
     }
 };
 
