@@ -13,6 +13,7 @@ using namespace coco;
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
     Rs485_UART_DMA rs485{loop,
+        // use USART1
         gpio::PA10 | gpio::AF1, // USART1 RX (PA10)
         gpio::PA9 | gpio::AF1, // USART1 TX (PA9)
         gpio::PA8, // DE (PA8)

@@ -45,7 +45,7 @@ Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
 Coroutine receive(Loop &loop, Buffer &buffer) {
     while (buffer.ready()) {
         // overwrite entire buffer
-        buffer.all().fill('x');
+        buffer.resize(buffer.capacity()).array<char>().fill('x');
 
         // start receiving
         debug::out << "Receive\n";

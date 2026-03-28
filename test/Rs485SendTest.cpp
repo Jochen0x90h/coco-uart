@@ -16,7 +16,7 @@ using namespace coco;
 Coroutine send(Loop &loop, Uart &rs485, Buffer &buffer) {
     while (buffer.ready()) {
         debug::toggleGreen();
-        co_await buffer.writeString("Hello RS485");
+        co_await buffer.write("Hello RS485");
         co_await loop.sleep(50ms);
     }
 

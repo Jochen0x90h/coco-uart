@@ -144,9 +144,10 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         // clear interrupt flag
         uart->EVENTS_ENDRX = 0;
 
-        receiveTransfers_.pop(
+        /*receiveTransfers_.pop(
             [this, uart](BufferBase &buffer) {
-                if (buffer.flags_ == 0)
+                // check if canceled
+                if (buffer.steps_ == 0)
                     buffer.setError(std::errc::operation_canceled);
                 else
                     buffer.setSuccess(uart->RXD.AMOUNT);
@@ -157,6 +158,21 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
                 // start next buffer
                 next.startRx();
             }
+        );*/
+        receiveTransfers_.pop(
+            [](auto &next) {
+                // start next buffer
+                next.startRx();
+            },
+            [this](auto &buffer) {
+                // check if canceled
+                if (buffer.steps_ == 0)
+                    buffer.setError(std::errc::operation_canceled);
+                else
+                    buffer.setSuccess(uart_->RXD.AMOUNT);
+                loop_.push(buffer);
+                return true;
+            }
         );
     }
 
@@ -165,20 +181,20 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         // clear interrupt flag
         uart->EVENTS_ENDTX = 0;
 
-        int result = sendTransfers_.pop(
+        /*int result = sendTransfers_.pop(
             [this, uart](BufferBase &buffer) {
-                if ((buffer.flags_ & int(BufferBase::Op::READ)) != 0) {
+                if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
                     // read after write
 
                     // update flags for cancel()
-                    buffer.flags_ = int(BufferBase::Op::READ);
+                    buffer.steps_ = int(BufferBase::Op::READ);
 
                     // add to list of pending receive transfers and start immediately if list was empty
                     if (receiveTransfers_.push(buffer))
                         buffer.startRx();
                 } else {
                     // update flags for cancel()
-                    buffer.flags_ = 0;
+                    buffer.steps_ = 0;
 
                     // pass buffer to event loop so that application gets notified
                     buffer.setSuccess();
@@ -192,6 +208,37 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
             }
         );
         if (result != 2 && newBaudRate_ > 0) {
+            uart.setBaudRate(newBaudRate_ * 1Hz);
+            newBaudRate_ = 0;
+        }*/
+
+        sendTransfers_.pop(
+            [this](auto &next) {
+                // transmit next buffer
+                next.startTx();
+            },
+            [this](auto &buffer) {
+                if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
+                    // read after write
+
+                    // update flags for cancel()
+                    buffer.steps_ = int(BufferBase::Op::READ);
+
+                    // add to list of pending receive transfers and start immediately if list was empty
+                    if (receiveTransfers_.push(buffer))
+                        buffer.startRx();
+                } else {
+                    // update flags for cancel()
+                    buffer.steps_ = 0;
+
+                    // pass buffer to event loop so that application gets notified
+                    buffer.setSuccess();
+                    loop_.push(buffer);
+                }
+            });
+
+        // change baud rate only if no send transfer in progress
+        if (sendTransfers_.empty() && newBaudRate_ > 0) {
             uart.setBaudRate(newBaudRate_ * 1Hz);
             newBaudRate_ = 0;
         }
@@ -211,15 +258,18 @@ Uart_UARTE_TIMER::BufferBase::~BufferBase() {
 }
 
 bool Uart_UARTE_TIMER::BufferBase::start() {
-    if (state_ != State::READY || (op_ & Op::READ_WRITE) == 0 || size_ == 0) {
-        // starting a buffer when the state is BUSY is a bug
-        assert(state_ != State::BUSY);
-        setSuccess(0);
+    if (state_ != State::READY) {
+        assert(false);
+        setError(std::errc::resource_unavailable_try_again);
+        return false;
+    }
+    if ((op_ & Op::READ_WRITE) == 0 || size_ == 0) {
+        setSuccess();
         return false;
     }
     auto &device = device_;
 
-    flags_ = int(op_ & Op::READ_WRITE);
+    steps_ = int(op_ & Op::READ_WRITE);
 
     if ((op_ & Op::WRITE) == 0) {
         // read
@@ -249,29 +299,30 @@ bool Uart_UARTE_TIMER::BufferBase::cancel() {
     bool canceled = false;
     {
         nvic::Guard guard(device.uartIrq_);
-        if ((flags_ & int(Op::WRITE)) != 0) {
+        if ((steps_ & int(Op::WRITE)) != 0) {
             // write: buffer is in sendTransfers_ list
 
             // remove from pending transfers if not in progress (first in list), otherwise complete normally
-            if (device.sendTransfers_.remove(*this, false) == 1) {
+            if (device.sendTransfers_.removeButFirst(*this)) {
                 canceled = true;
             }
-        } else if ((flags_ & int(Op::READ)) != 0) {
+        } else if ((steps_ & int(Op::READ)) != 0) {
             // read: buffer is in receiveTransfers_ list
 
             // remove from pending transfers if not in progress (first in list), otherwise check if something was received
-            if (device.receiveTransfers_.remove(*this, false) == 1) {
+            if (device.receiveTransfers_.removeButFirst(*this)) {
                 canceled = true;
             } else if (!device.uart_->EVENTS_RXDRDY) {
                 // haven't received anything yet: stop
                 device.uart_.stopRx();
 
+                // finish cancel in UARTE_IRQHandler()
                 // -> EVENTS_ENDRX
             }
         }
 
         // clear pending read/write operations
-        flags_ = 0;
+        steps_ = 0;
     }
 
     if (canceled) {

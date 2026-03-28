@@ -9,7 +9,7 @@ using namespace coco;
 
 
 /// @brief Drivers for UartSendTest
-/// Board: https://www.st.com/resource/en/user_manual/dm00556337-stm32g4-nucleo-64-boards-mb1367-stmicroelectronics.pdf
+/// Board: https://www.st.com/en/evaluation-tools/nucleo-h503rb.html
 /// Connect RX and TX to test the loopback
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};

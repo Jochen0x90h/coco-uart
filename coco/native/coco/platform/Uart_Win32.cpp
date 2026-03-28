@@ -70,7 +70,6 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
 
     // enable buffers
     for (auto &buffer : buffers_) {
-        buffer.setSuccess(0);
         buffer.setReady();
     }
 
@@ -286,16 +285,20 @@ Uart_Win32::Buffer::~Buffer() {
 }
 
 bool Uart_Win32::Buffer::start() {
-    if (state_ != State::READY || (op_ & Op::READ_WRITE) == 0 || size_ == 0) {
-        assert(state_ != State::BUSY);
-        setSuccess(0);
+    if (state_ != State::READY) {
+        assert(false);
+        setError(std::errc::resource_unavailable_try_again);
+        return false;
+    }
+    if ((op_ & Op::READ_WRITE) == 0 || size_ == 0) {
+        setSuccess();
         return false;
     }
 
     // initialize overlapped
     memset(&overlapped_, 0, sizeof(OVERLAPPED));
 
-    flags_ = int(op_ & Op::READ_WRITE);
+    steps_ = int(op_ & Op::READ_WRITE);
 
     // get data and size to read/write
     int result;
@@ -326,7 +329,7 @@ bool Uart_Win32::Buffer::cancel() {
     if (state_ != State::BUSY)
         return false;
 
-    if (flags_ != 0) {
+    if (steps_ != 0) {
         auto result = CancelIoEx(device_.file_, &overlapped_);
         if (!result) {
             int error = GetLastError();
@@ -336,7 +339,7 @@ bool Uart_Win32::Buffer::cancel() {
         }
 
         // clear pending read/write operations
-        flags_ = 0;
+        steps_ = 0;
     }
     return true;
 }
@@ -346,9 +349,9 @@ void Uart_Win32::Buffer::handle(OVERLAPPED *overlapped) {
     auto result = GetOverlappedResult(device_.file_, overlapped, &transferred, false);
     if (result) {
         // success
-        if (flags_ == int(Op::READ_WRITE)) {
+        if (steps_ == int(Op::READ_WRITE)) {
             // read after write
-            flags_ = int(Op::READ);
+            steps_ = int(Op::READ);
 
             // initialize overlapped
             memset(&overlapped_, 0, sizeof(OVERLAPPED));
