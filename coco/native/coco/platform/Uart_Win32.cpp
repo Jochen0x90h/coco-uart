@@ -36,11 +36,10 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
     }
 
     // add file to completion port of event loop
-    Loop_Win32::CompletionHandler *handler = this;
     if (CreateIoCompletionPort(
         file,
         loop_.port,
-        ULONG_PTR(handler),
+        ULONG_PTR(&static_cast<Loop_Win32::CompletionHandler &>(*this)),
         0) == nullptr)
     {
         int error = GetLastError();
