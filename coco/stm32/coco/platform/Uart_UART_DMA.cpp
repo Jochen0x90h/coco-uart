@@ -173,34 +173,11 @@ void Uart_UART_DMA::disableRx() {
     //debug::out << "disableRx\n";
     nvic::Guard2 guard(uartIrq_, rxDmaIrq_);
 
-    // check if a receive transfer is in progress
-    /*receiveTransfers_.pop(
-        [this](Uart_UART_DMA::BufferBase &buffer) {
+    // check if we are still waiting for the first character
+    //if (rxChannel_.count() == int(buffer.capacity_))
 
-            // check if we are still waiting for the first character
-            if (rxChannel_.count() == int(buffer.capacity_)) {
-                // keep receive buffer
-                return false;
-            }
 
-            // abort transfer and pass buffer to the event loop so that the application gets notified
-            buffer.size_ = 0;//rxBuffer.p.capacity - rxChannel->CNDTR;
-            loop_.push(buffer);
-            return true;
-        }
-    );*/
-    receiveTransfers_.popIf(
-        [this](auto &buffer) {
-            // keep receive buffer (reject pop) if we are still waiting for the first character
-            return rxChannel_.count() != int(buffer.capacity_);
-        },
-        [this](auto &buffer) {
-            // abort transfer and pass buffer to the event loop so that the application gets notified
-            buffer.size_ = 0;//rxBuffer.p.capacity - rxChannel->CNDTR;
-            loop_.push(buffer);
-        }
-    );
-
+    // keep receive buffer and start it again when rx is enabled
 
     // disable rx and DMA
     uart_
@@ -224,34 +201,21 @@ void Uart_UART_DMA::handleRx() {
         .disable()
         .clear(dma::Status::TRANSFER_COMPLETE);
 
+    // get number of bytes left in the buffer (0 = buffer is full)
     int count = rxChannel_.count();
 
-    /*receiveTransfers_.pop(
-        [this](BufferBase &buffer) {
-            // buffer size is number of received bytes
-            buffer.setSuccess(buffer.capacity_ - rxChannel_.count());
-
-            // inform application that receive is finished
-            loop_.push(buffer);
-            return true;
-        },
-        [this](BufferBase &next) {
-            // start next buffer
-            startRx(next);
-        }
-    );*/
-    receiveTransfers_.pop(
+    auto buffer = receiveTransfers_.pop(
         [this](auto &next) {
             // start next buffer
             startRx(next);
-        },
-        [this, count](auto &buffer) {
-            // buffer size is number of received bytes
-            buffer.setSuccess(buffer.capacity_ - count);
-
-            // inform application that receive is finished
-            loop_.push(buffer);
         });
+    if (buffer != nullptr) {
+        // buffer size is number of received bytes
+        buffer->setSuccess(buffer->capacity_ - count);
+
+        // inform application that receive is finished
+        loop_.push(*buffer);
+    }
 }
 
 // called from UART interrupt (DMA interrupt has same priority and therefore can't execute)
@@ -265,67 +229,34 @@ void Uart_UART_DMA::handleTx() {
     // clear interrupt flag at UART
     uart.clear(uart::Status::TX_COMPLETE);
 
-    /*int result = sendTransfers_.pop(
-        [this](BufferBase &buffer) {
-            // notify derived class that TX has ended
-            endTx();
-
-            if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
-                // read after write
-
-                // update flags for cancel()
-                buffer.steps_ = int(BufferBase::Op::READ);
-
-                // add to list of pending receive transfers and start immediately if list was empty
-                if (receiveTransfers_.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
-                    startRx(buffer);
-            } else {
-                // update flags for cancel()
-                buffer.steps_ = 0;
-
-                // pass buffer to event loop so that application gets notified
-                buffer.setSuccess();
-                loop_.push(buffer);
-            }
-            return true;
-        },
-        [this](BufferBase &next) {
-            // transmit next buffer
-            startTx(next);
-        }
-    );
-    if (result != 2 && newBaudRate_ > 0) {
-        uart.setBaudRate(clock_, newBaudRate_ * 1Hz);
-        newBaudRate_ = 0;
-    }*/
-
     // notify derived class that TX has ended
     endTx();
 
-    sendTransfers_.pop(
+    auto b = sendTransfers_.pop(
         [this](auto &next) {
             // transmit next buffer
             startTx(next);
-        },
-        [this](auto &buffer) {
-            if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
-                // read after write
-
-                // update flags for cancel()
-                buffer.steps_ = int(BufferBase::Op::READ);
-
-                // add to list of pending receive transfers and start immediately if list was empty
-                if (receiveTransfers_.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
-                    startRx(buffer);
-            } else {
-                // update flags for cancel()
-                buffer.steps_ = 0;
-
-                // pass buffer to event loop so that application gets notified
-                buffer.setSuccess();
-                loop_.push(buffer);
-            }
         });
+    if (b != nullptr) {
+        auto &buffer = *b;
+        if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
+            // read after write
+
+            // update flags for cancel()
+            buffer.steps_ = int(BufferBase::Op::READ);
+
+            // add to list of pending receive transfers and start immediately if list was empty
+            if (receiveTransfers_.push(buffer)) // DMA interrupt has same priority and therefore doesn't need to be disabled
+                startRx(buffer);
+        } else {
+            // update flags for cancel()
+            buffer.steps_ = 0;
+
+            // pass buffer to event loop so that application gets notified
+            buffer.setSuccess();
+            loop_.push(buffer);
+        }
+    }
 
     // change baud rate only if no send transfer in progress
     if (sendTransfers_.empty() && newBaudRate_ > 0) {
@@ -371,7 +302,7 @@ bool Uart_UART_DMA::BufferBase::start() {
         // write
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.sendTransfers_.push(nvic::Guard2(device.uartIrq_, device.rxDmaIrq_), *this))
+        if (device.sendTransfers_.guardedPush(nvic::Guard2(device.uartIrq_, device.rxDmaIrq_), *this))
             device.startTx(*this);
     }
 
@@ -392,44 +323,23 @@ bool Uart_UART_DMA::BufferBase::cancel() {
         if ((steps_ & int(Op::WRITE)) != 0) {
             // write: buffer is in sendTransfers_ list
 
-            // remove from pending transfers if not yet started, otherwise complete normally
-            if (device.sendTransfers_.removeButFirst(*this)) {
-                //device.endTx();
-                canceled = true;
-            }
+            // cancel if not yet started, otherwise complete normally
+            canceled = device.receiveTransfers_.removeExceptFirst(*this);
         } else if ((steps_ & int(Op::READ)) != 0) {
             // read: buffer is in receiveTransfers_ list
 
-            // remove this buffer from pending transfers if not yet started or nothing received yet, otherwise complete normally
-            /*if (device.receiveTransfers_.remove(*this,
-                [&device](BufferBase &buffer) {
-                    // check if we are still waiting for the first character
-                    if (device.rxChannel_.count() == int(buffer.capacity_)) {
-                        // disable rx and DMA
-                        device.uart_
-                            .stopRx()
-                            .clear(uart::Status::RX_TIMEOUT);
-                        device.rxChannel_
-                            .disable()
-                            .clear(dma::Status::TRANSFER_COMPLETE);
-                        nvic::clear(device.uartIrq_);
-                        nvic::clear(device.rxDmaIrq_);
-                        return true;
-                    }
-                    return false;
-                },
-                [&device](BufferBase &next) {
-                    // start next buffer if the first buffer was removed
-                    device.startRx(next);
-                }
-                ) == 1)
-            {
-                canceled = true;
-            }*/
+            // cancel if not yet started or still waiting for the first character, otherwise complete normally
+            canceled = device.receiveTransfers_.removeIf(
+                [this, &device](auto &buffer, int index) {
+                    // only cancel this buffer
+                    if (&buffer != this)
+                        return false;
 
-            canceled = device.receiveTransfers_.removeButFirstIf(*this,
-                [&device](auto &buffer) {
-                    // we can cancel if we are still waiting for the first character
+                    // cancel if not yet started (not at front of queue)
+                    if (index > 0)
+                        return true;
+
+                    // cancel if we are still waiting for the first character
                     if (device.rxChannel_.count() == int(buffer.capacity_)) {
                         // disable rx and DMA
                         device.uart_
@@ -444,10 +354,11 @@ bool Uart_UART_DMA::BufferBase::cancel() {
                     }
                     return false;
                 },
-                [&device](auto &next) {
+                [&device](auto &next, int index) {
                     // start next buffer if the first buffer was removed
-                    device.startRx(next);
-                });
+                    if (index == 0)
+                        device.startRx(next);
+                }) != nullptr;
         }
 
         // clear pending read/write operations

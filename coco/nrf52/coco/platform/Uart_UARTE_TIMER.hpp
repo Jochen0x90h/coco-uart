@@ -108,8 +108,8 @@ protected:
     IntrusiveList<BufferBase> buffers_;
 
     // list of active transfers
-    InterruptQueue2<BufferBase> receiveTransfers_;
-    InterruptQueue2<BufferBase> sendTransfers_;
+    InterruptQueue<BufferBase> receiveTransfers_;
+    InterruptQueue<BufferBase> sendTransfers_;
 
     // new baud rate value to be applied when no TX transfer is in progress
     int newBaudRate_ = 0;

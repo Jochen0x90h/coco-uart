@@ -144,36 +144,23 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         // clear interrupt flag
         uart->EVENTS_ENDRX = 0;
 
-        /*receiveTransfers_.pop(
-            [this, uart](BufferBase &buffer) {
-                // check if canceled
-                if (buffer.steps_ == 0)
-                    buffer.setError(std::errc::operation_canceled);
-                else
-                    buffer.setSuccess(uart->RXD.AMOUNT);
-                loop_.push(buffer);
-                return true;
-            },
-            [](BufferBase &next) {
-                // start next buffer
-                next.startRx();
-            }
-        );*/
-        receiveTransfers_.pop(
+        int count = uart->RXD.AMOUNT;
+
+        auto b = receiveTransfers_.pop(
             [](auto &next) {
                 // start next buffer
                 next.startRx();
-            },
-            [this](auto &buffer) {
-                // check if canceled
-                if (buffer.steps_ == 0)
-                    buffer.setError(std::errc::operation_canceled);
-                else
-                    buffer.setSuccess(uart_->RXD.AMOUNT);
-                loop_.push(buffer);
-                return true;
-            }
-        );
+            });
+        if (b != nullptr) {
+            auto &buffer = *b;
+
+            // check if canceled
+            if (buffer.steps_ == 0)
+                buffer.setError(std::errc::operation_canceled);
+            else
+                buffer.setSuccess(count);
+            loop_.push(buffer);
+        }
     }
 
     // check if transmission has completed
@@ -181,61 +168,31 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
         // clear interrupt flag
         uart->EVENTS_ENDTX = 0;
 
-        /*int result = sendTransfers_.pop(
-            [this, uart](BufferBase &buffer) {
-                if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
-                    // read after write
-
-                    // update flags for cancel()
-                    buffer.steps_ = int(BufferBase::Op::READ);
-
-                    // add to list of pending receive transfers and start immediately if list was empty
-                    if (receiveTransfers_.push(buffer))
-                        buffer.startRx();
-                } else {
-                    // update flags for cancel()
-                    buffer.steps_ = 0;
-
-                    // pass buffer to event loop so that application gets notified
-                    buffer.setSuccess();
-                    loop_.push(buffer);
-                }
-                return true;
-            },
-            [](BufferBase &next) {
-                // start next buffer
-                next.startTx();
-            }
-        );
-        if (result != 2 && newBaudRate_ > 0) {
-            uart.setBaudRate(newBaudRate_ * 1Hz);
-            newBaudRate_ = 0;
-        }*/
-
-        sendTransfers_.pop(
+        auto b = sendTransfers_.pop(
             [this](auto &next) {
                 // transmit next buffer
                 next.startTx();
-            },
-            [this](auto &buffer) {
-                if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
-                    // read after write
-
-                    // update flags for cancel()
-                    buffer.steps_ = int(BufferBase::Op::READ);
-
-                    // add to list of pending receive transfers and start immediately if list was empty
-                    if (receiveTransfers_.push(buffer))
-                        buffer.startRx();
-                } else {
-                    // update flags for cancel()
-                    buffer.steps_ = 0;
-
-                    // pass buffer to event loop so that application gets notified
-                    buffer.setSuccess();
-                    loop_.push(buffer);
-                }
             });
+        if (b != nullptr) {
+            auto &buffer = *b;
+            if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
+                // read after write
+
+                // update flags for cancel()
+                buffer.steps_ = int(BufferBase::Op::READ);
+
+                // add to list of pending receive transfers and start immediately if list was empty
+                if (receiveTransfers_.push(buffer))
+                    buffer.startRx();
+            } else {
+                // update flags for cancel()
+                buffer.steps_ = 0;
+
+                // pass buffer to event loop so that application gets notified
+                buffer.setSuccess();
+                loop_.push(buffer);
+            }
+        }
 
         // change baud rate only if no send transfer in progress
         if (sendTransfers_.empty() && newBaudRate_ > 0) {
@@ -275,13 +232,13 @@ bool Uart_UARTE_TIMER::BufferBase::start() {
         // read
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.receiveTransfers_.push(nvic::Guard(device.uartIrq_), *this))
+        if (device.receiveTransfers_.guardedPush(nvic::Guard(device.uartIrq_), *this))
             startRx();
     } else {
         // write
 
         // add to list of pending transfers and start immediately if list was empty
-        if (device.sendTransfers_.push(nvic::Guard(device.uartIrq_), *this))
+        if (device.sendTransfers_.guardedPush(nvic::Guard(device.uartIrq_), *this))
             startTx();
     }
 
@@ -303,14 +260,12 @@ bool Uart_UARTE_TIMER::BufferBase::cancel() {
             // write: buffer is in sendTransfers_ list
 
             // remove from pending transfers if not in progress (first in list), otherwise complete normally
-            if (device.sendTransfers_.removeButFirst(*this)) {
-                canceled = true;
-            }
+            canceled = device.sendTransfers_.removeExceptFirst(*this);
         } else if ((steps_ & int(Op::READ)) != 0) {
             // read: buffer is in receiveTransfers_ list
 
             // remove from pending transfers if not in progress (first in list), otherwise check if something was received
-            if (device.receiveTransfers_.removeButFirst(*this)) {
+            if (device.receiveTransfers_.removeExceptFirst(*this)) {
                 canceled = true;
             } else if (!device.uart_->EVENTS_RXDRDY) {
                 // haven't received anything yet: stop
