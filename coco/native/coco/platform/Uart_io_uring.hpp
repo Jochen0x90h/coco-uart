@@ -51,13 +51,13 @@ public:
         bool cancel() override;
 
     protected:
-        void handle(io_uring_cqe &cqe);
+        void onCompletion(io_uring_cqe &cqe);
 
         Uart_io_uring &device_;
     };
 
 protected:
-    void handle(io_uring_cqe &cqe);
+    void onCompletion(io_uring_cqe &cqe);
 
     Loop_io_uring &loop_;
     int baudRate_ = 0;

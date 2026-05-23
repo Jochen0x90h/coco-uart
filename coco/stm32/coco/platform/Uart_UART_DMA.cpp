@@ -374,7 +374,7 @@ bool Uart_UART_DMA::BufferBase::cancel() {
     return true;
 }
 
-void Uart_UART_DMA::BufferBase::handle() {
+void Uart_UART_DMA::BufferBase::onCompletion() {
     setReady();
 }
 

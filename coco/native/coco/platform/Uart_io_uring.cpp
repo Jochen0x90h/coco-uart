@@ -150,8 +150,8 @@ void Uart_io_uring::close() {
     notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
-void Uart_io_uring::handle(io_uring_cqe &cqe) {
-    
+void Uart_io_uring::onCompletion(io_uring_cqe &cqe) {
+
 }
 
 
@@ -207,7 +207,7 @@ bool Uart_io_uring::Buffer::cancel() {
     return true;
 }
 
-void Uart_io_uring::Buffer::handle(io_uring_cqe &cqe) {
+void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe) {
     auto result = cqe.res;
     if (result >= 0) {
         // success
@@ -220,7 +220,7 @@ void Uart_io_uring::Buffer::handle(io_uring_cqe &cqe) {
                 // error: submit buffer full
                 setError(std::errc::resource_unavailable_try_again);
             } else {
-                // -> handle()
+                // -> onCompletion()
                 return;
             }
         } else {

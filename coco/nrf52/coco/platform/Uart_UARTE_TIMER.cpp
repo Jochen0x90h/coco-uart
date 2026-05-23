@@ -319,7 +319,7 @@ void Uart_UARTE_TIMER::BufferBase::startTx() {
     // -> UARTE_IRQHandler
 }
 
-void Uart_UARTE_TIMER::BufferBase::handle() {
+void Uart_UARTE_TIMER::BufferBase::onCompletion() {
     setReady();
 }
 

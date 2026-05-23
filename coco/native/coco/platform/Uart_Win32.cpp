@@ -237,10 +237,10 @@ void Uart_Win32::close() {
     notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
-void Uart_Win32::handle(OVERLAPPED *overlapped) {
+void Uart_Win32::onCompletion(OVERLAPPED *overlapped) {
     for (auto &buffer : buffers_) {
         if (overlapped == &buffer.overlapped_) {
-            buffer.handle(overlapped);
+            buffer.onCompletion(overlapped);
             return;
         }
     }
@@ -343,7 +343,7 @@ bool Uart_Win32::Buffer::cancel() {
     return true;
 }
 
-void Uart_Win32::Buffer::handle(OVERLAPPED *overlapped) {
+void Uart_Win32::Buffer::onCompletion(OVERLAPPED *overlapped) {
     DWORD transferred;
     auto result = GetOverlappedResult(device_.file_, overlapped, &transferred, false);
     if (result) {
@@ -363,11 +363,11 @@ void Uart_Win32::Buffer::handle(OVERLAPPED *overlapped) {
                     // error
                     setSystemError(error);
                 } else {
-                    // -> handle()
+                    // -> onCompletion()
                     return;
                 }
             } else {
-                // -> handle()
+                // -> onCompletion()
                 return;
             }
         } else {

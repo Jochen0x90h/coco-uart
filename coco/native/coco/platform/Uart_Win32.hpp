@@ -51,14 +51,14 @@ public:
         bool cancel() override;
 
     protected:
-        void handle(OVERLAPPED *overlapped);
+        void onCompletion(OVERLAPPED *overlapped);
 
         Uart_Win32 &device_;
         OVERLAPPED overlapped_;
     };
 
 protected:
-    void handle(OVERLAPPED *overlapped) override;
+    void onCompletion(OVERLAPPED *overlapped) override;
 
     Loop_Win32 &loop_;
     int baudRate_ = 0;

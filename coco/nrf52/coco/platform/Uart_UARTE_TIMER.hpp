@@ -54,7 +54,7 @@ public:
 
 
     // internal buffer base class, derives from IntrusiveListNode for the list of buffers and Loop_Queue::Handler to be notified from the event loop
-    class BufferBase : public coco::Buffer, public IntrusiveListNode, public Loop_Queue::Handler {
+    class BufferBase : public coco::Buffer, public IntrusiveListNode, public Loop_Queue::CompletionHandler {
         friend class Uart_UARTE_TIMER;
     public:
         /// @brief Constructor
@@ -71,7 +71,7 @@ public:
     protected:
         void startRx();
         void startTx();
-        void handle() override;
+        void onCompletion() override;
 
         Uart_UARTE_TIMER &device_;
         //Op op_;
