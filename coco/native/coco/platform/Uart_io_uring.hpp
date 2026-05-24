@@ -1,12 +1,15 @@
-#include <coco/platform/Loop_native.hpp>
+#pragma once
+
 #include <coco/Uart.hpp>
+#include <coco/InterruptQueue.hpp>
+#include <coco/platform/Loop_native.hpp>
 
 
 namespace coco {
 
 /// @brief UART implementation using io_uring on Windows.
 ///
-class Uart_io_uring : public Uart, public Loop_io_uring::CompletionHandler {
+class Uart_io_uring : public Uart, public Loop_io_uring::CompletionHandler, public Loop_io_uring::TimeoutHandler {
 public:
     /// @brief Constructor/
     /// @param loop event loop
@@ -21,8 +24,11 @@ public:
 
     /// @brief Open device by name.
     /// Fails if already open. Calling close() is ok if the uart is not open.
-    /// @param name device name
-    /// @return ture if successful
+    /// @param name Device name (e.g. "/dev/ttyUSB0")
+    /// @param format Data format (number of data and stop bits)
+    /// @param baudRate Baud Rate
+    /// @param rxTimeout Receive timeout (min. 20ms)
+    /// @return true if successful
     bool open(String name, Format format, int baudRate, Milliseconds<> rxTimeout);
 
     // Uart methods
@@ -40,7 +46,9 @@ public:
 
     /// @brief Buffer for transferring data to/from a UART device (COM port)
     ///
-    class Buffer : public coco::Buffer, public Loop_io_uring::CompletionHandler, public IntrusiveListNode {
+    class Buffer : public coco::Buffer, public Loop_io_uring::CompletionHandler, public coco::IntrusiveListNode,
+        public IntrusiveMpscQueueNode
+    {
         friend class Uart_io_uring;
     public:
         Buffer(Uart_io_uring &device, int size);
@@ -58,9 +66,11 @@ public:
 
 protected:
     void onCompletion(io_uring_cqe &cqe);
+    void onTimeout();
 
     Loop_io_uring &loop_;
     int baudRate_ = 0;
+    Milliseconds<> rxTimeout_;
 
     // file handle
     static constexpr int INVALID_HANDLE_VALUE = -1;
@@ -70,10 +80,11 @@ protected:
     IntrusiveList<Buffer> buffers_;
 
     // list of active transfers
-    //InterruptQueue<Buffer> receiveTransfers_;
-    //InterruptQueue<Buffer> sendTransfers_;
+    InterruptQueue<Buffer> receiveTransfers_;
 
-    //int poll_ = 0;
+    // receive buffer
+    uint8_t receiveBuffer[32];
+    int receivedSize_ = 0;
 };
 
 

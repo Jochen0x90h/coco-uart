@@ -1,3 +1,5 @@
+#pragma once
+
 #include <coco/platform/Loop_native.hpp> // includes Windows.h, #undef PARITY_xxx
 #include <coco/Uart.hpp>
 
@@ -21,8 +23,11 @@ public:
 
     /// @brief Open device by name.
     /// Fails if already open. Calling close() is ok if the uart is not open.
-    /// @param name device name
-    /// @return ture if successful
+    /// @param name Device name (e.g. "\\\\.\\COM9")
+    /// @param format Data format (number of data and stop bits)
+    /// @param baudRate Baud Rate
+    /// @param rxTimeout Receive timeout (min. 20ms)
+    /// @return true if successful
     bool open(String name, Format format, int baudRate, Milliseconds<> rxTimeout);
 
     // Uart methods

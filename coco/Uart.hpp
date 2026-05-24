@@ -51,8 +51,8 @@ public:
         PARITY_NONE = 0,
         PARITY_ODD = 1 << 5,
         PARITY_EVEN = 2 << 5,
-        PARITY_MARK = 3 << 5,
-        PARITY_SPACE = 4 << 5,
+        PARITY_MARK = 3 << 5, // parity bit is always 1
+        PARITY_SPACE = 4 << 5, // parity bit is always 0
         PARITY_MASK = 7 << 5,
 
         // number of stop bits

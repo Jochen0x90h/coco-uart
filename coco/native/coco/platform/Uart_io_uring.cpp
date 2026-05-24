@@ -3,7 +3,8 @@
 #include <iostream>
 #include <filesystem>
 #include <fcntl.h>
-#include <termios.h>
+#include <sys/ioctl.h>
+#include <asm/termbits.h> // termios2
 #include <unistd.h>
 
 
@@ -19,7 +20,7 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
 
     // open file
     std::string n(name);
-    int com = ::open(n.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    int com = ::open(n.c_str(), O_RDWR | O_NOCTTY);
     if (com == INVALID_HANDLE_VALUE) {
         int error = errno;
         setSystemError(error);
@@ -29,16 +30,9 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
     setSuccess();
 
     // configure
-    setFormat(format);
+    setFormat(format); // also sets timeouts
     setBaudRate(baudRate);
-
-    // set timeouts
-    termios tty;
-    tcgetattr(com, &tty);
-    cfmakeraw(&tty);
-    tty.c_cc[VMIN]  = 1;
-    tty.c_cc[VTIME] = 1;
-    tcsetattr(com, TCSANOW, &tty);
+    rxTimeout_ = max(rxTimeout, 20ms);
 
     // set state
     state_ = State::READY;
@@ -52,8 +46,6 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
     // resume all coroutines waiting for state change
     notify(Events::ENTER_OPENING | Events::ENTER_READY);
 
-    //loop.poll(file, POLLIN | POLLOUT, this);
-
     return true;
 }
 
@@ -62,40 +54,69 @@ void Uart_io_uring::setValue(int id, int value) {
     case Value::FORMAT:
         {
             int dataBits = extract(value, int(Format::DATA_MASK));
-            int parity = extract(value, int(Format::PARITY_MASK));
+            auto parity = Format(value) & Format::PARITY_MASK;
             int stopBits = extract(value, int(Format::STOP_MASK));
 
-            termios tty;
-            tcgetattr(com_, &tty);
-            tty.c_cflag &= ~PARENB;         // No Parity
-            tty.c_cflag &= ~CSTOPB;         // 1 Stop bit
-            tty.c_cflag &= ~CSIZE;
-            tty.c_cflag |=  CS8;            // 8 data bits
-            tty.c_cflag &= ~CRTSCTS;        // No hardware flow control
-            tty.c_cflag |=  CREAD | CLOCAL; // Enable reading, ignore modem ctrl
+            int cflag = CREAD | CLOCAL; // enable reading, ignore modem ctrl
+            switch (dataBits) {
+            case 5:
+                cflag |= CS5;
+                break;
+            case 6:
+                cflag |= CS6;
+                break;
+            case 7:
+                cflag |= CS7;
+                break;
+            default:
+                cflag |= CS8;
+            }
+            switch (parity) {
+            case Format::PARITY_ODD:
+                cflag |= PARENB | PARODD;
+            case Format::PARITY_EVEN:
+                cflag |= PARENB;
+            case Format::PARITY_MARK:
+                cflag |= PARENB | CMSPAR | PARODD;
+            case Format::PARITY_SPACE:
+                cflag |= PARENB | CMSPAR;
+            default:
+                ;
+            }
+            if (stopBits != 0) {
+                cflag |= CSTOPB;
+            }
 
-            tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw input
-            tty.c_oflag &= ~OPOST;                           // Raw output
-            tty.c_iflag &= ~(IXON | IXOFF | IXANY);          // No SW flow control
-            tcsetattr(com_, TCSANOW, &tty);
+            // set flags
+            termios2 tio;
+            ioctl(com_, TCGETS2, &tio);
+            tio.c_cflag = (tio.c_cflag & CBAUD) | cflag;
+            tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // raw input
+            tio.c_oflag &= ~OPOST;                           // raw output
+            tio.c_iflag &= ~(IXON | IXOFF | IXANY);          // no software flow control
+            
+            // also set timeouts
+            tio.c_cc[VMIN]  = 0; // wait for first character
+            tio.c_cc[VTIME] = 0; // timeout
+            ioctl(com_, TCSETS2, &tio);
         }
         break;
     case Value::BAUD:
         {
             baudRate_ = value;
-
-            termios tty;
-            tcgetattr(com_, &tty);
-            cfsetospeed(&tty, B115200);
-            cfsetispeed(&tty, B115200);
-            tcsetattr(com_, TCSANOW, &tty);
+            
+            termios2 tio;
+            ioctl(com_, TCGETS2, &tio);
+            tio.c_cflag = (tio.c_cflag & ~CBAUD) | BOTHER; // set other baud rate
+            tio.c_ispeed = value;
+            tio.c_ospeed = value;
+            ioctl(com_, TCSETS2, &tio);
         }
         break;
     case Value::RX_TIMEOUT:
         {
             // calc timeout in milliseconds
-            int rxTimeout = std::max(value * 1000 / baudRate_ + 1, 20);
-
+            rxTimeout_ = std::max(value * 1000 / baudRate_ + 1, 20) * 1ms;
         }
         break;
     case Value::OUTPUT_SIGNALS:
@@ -150,10 +171,32 @@ void Uart_io_uring::close() {
     notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
-void Uart_io_uring::onCompletion(io_uring_cqe &cqe) {
-
+void Uart_io_uring::onCompletion(io_uring_cqe &cqe) {   
+    auto buffer = receiveTransfers_.popIf(
+        [this](auto &buffer) {
+            int count = read(com_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
+            receivedSize_ += count;
+            return receivedSize_ >= buffer.size_;
+        });
+    if (!receiveTransfers_.empty()) {
+        loop_.poll(com_, POLLIN, this);
+        loop_.invoke(*this, rxTimeout_);
+    }
+    if (buffer != nullptr) {
+        buffer->setSuccess();
+        receivedSize_ = 0;
+        buffer->setReady();
+    }
 }
 
+void Uart_io_uring::onTimeout() {
+    auto buffer = receiveTransfers_.pop();
+    if (buffer != nullptr) {
+        buffer->setSuccess(receivedSize_);
+        receivedSize_ = 0;
+        buffer->setReady();
+    }
+}
 
 // Uart_io_uring::Buffer
 
@@ -174,16 +217,21 @@ bool Uart_io_uring::Buffer::start() {
         setSuccess(0);
         return false;
     }
+    auto &device = device_;
 
-    flags_ = int(op_ & Op::READ_WRITE);
-
-    // read/write
-    if (!device_.loop_.transfer((op_ & Op::WRITE) == 0 ? IORING_OP_READ : IORING_OP_WRITE,
-        device_.com_, 0, data_, size_, this))
-    {
-        // error: submit buffer full
-        setError(std::errc::resource_unavailable_try_again);
-        return false;
+    steps_ = int(op_ & Op::READ_WRITE);
+    
+    if ((op_ & Op::WRITE) == 0) {
+        // read
+        if (device.receiveTransfers_.push(*this))
+            device.loop_.poll(device.com_, POLLIN, &device);
+    } else {
+        // write
+        if (!device.loop_.transfer(IORING_OP_WRITE, device.com_, 0, data_, size_, this)) {
+            // error: submit buffer full
+            setError(std::errc::resource_unavailable_try_again);
+            return false;
+        }
     }
 
     // set state
@@ -196,13 +244,13 @@ bool Uart_io_uring::Buffer::cancel() {
     if (state_ != State::BUSY)
         return false;
 
-    if (flags_ != 0) {
+    if (steps_ != 0) {
         if (!device_.loop_.cancel(this)) {
             // error: submit buffer full
             setError(std::errc::resource_unavailable_try_again);
             return false;
         }
-        flags_ = 0;
+        steps_ = 0;
     }
     return true;
 }
@@ -211,19 +259,15 @@ void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe) {
     auto result = cqe.res;
     if (result >= 0) {
         // success
-        if (flags_ == int(Op::READ_WRITE)) {
+        if (steps_ == int(Op::READ_WRITE)) {
             // read after write
-            flags_ = int(Op::READ);
+            steps_ = int(Op::READ);
 
-            // read
-            if (!device_.loop_.transfer(IORING_OP_READ, device_.com_, 0, data_, size_, this)) {
-                // error: submit buffer full
-                setError(std::errc::resource_unavailable_try_again);
-            } else {
-                // -> onCompletion()
-                return;
-            }
+            auto &device = device_;
+            if (device.receiveTransfers_.push(*this))
+                device.loop_.poll(device.com_, POLLIN, this);
         } else {
+            // set success with transferred size
             setSuccess(result);
         }
     } else {

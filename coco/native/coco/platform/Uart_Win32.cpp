@@ -56,7 +56,7 @@ bool Uart_Win32::open(String name, Format format, int baudRate, Milliseconds<> r
 
     // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcommtimeouts
     COMMTIMEOUTS timeouts;
-    timeouts.ReadIntervalTimeout = rxTimeout.value;
+    timeouts.ReadIntervalTimeout = max(rxTimeout.value, 20);
     timeouts.ReadTotalTimeoutMultiplier = 0;
     timeouts.ReadTotalTimeoutConstant = 0;
     timeouts.WriteTotalTimeoutMultiplier = 0;

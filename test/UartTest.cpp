@@ -101,7 +101,7 @@ Coroutine detect(Loop &loop, Uart &uart) {
 
 
 #ifdef NATIVE
-// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM9"
+// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM9" or "/dev/ttyUSB0"
 int main(int argc, char **argv) {
     if (argc < 2)
         return 1;
