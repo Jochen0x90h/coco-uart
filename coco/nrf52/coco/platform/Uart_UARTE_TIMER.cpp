@@ -177,6 +177,7 @@ void Uart_UARTE_TIMER::UARTE_IRQHandler() {
             auto &buffer = *b;
             if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
                 // read after write
+                buffer.size_ = buffer.capacity_;
 
                 // update flags for cancel()
                 buffer.steps_ = int(BufferBase::Op::READ);

@@ -59,13 +59,13 @@ public:
         bool cancel() override;
 
     protected:
-        void onCompletion(io_uring_cqe &cqe);
+        void onCompletion(io_uring_cqe &cqe, int id) override;
 
         Uart_io_uring &device_;
     };
 
 protected:
-    void onCompletion(io_uring_cqe &cqe);
+    void onCompletion(io_uring_cqe &cqe, int id) override;
     void onTimeout();
 
     Loop_io_uring &loop_;

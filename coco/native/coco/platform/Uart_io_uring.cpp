@@ -171,21 +171,24 @@ void Uart_io_uring::close() {
     notify(Events::ENTER_CLOSING | Events::ENTER_DISABLED);
 }
 
-void Uart_io_uring::onCompletion(io_uring_cqe &cqe) {   
-    auto buffer = receiveTransfers_.popIf(
-        [this](auto &buffer) {
-            int count = read(com_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
-            receivedSize_ += count;
-            return receivedSize_ >= buffer.size_;
-        });
-    if (!receiveTransfers_.empty()) {
-        loop_.poll(com_, POLLIN, this);
-        loop_.invoke(*this, rxTimeout_);
-    }
-    if (buffer != nullptr) {
-        buffer->setSuccess();
-        receivedSize_ = 0;
-        buffer->setReady();
+void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
+    if (cqe.res & POLLIN) {
+        auto buffer = receiveTransfers_.popIf(
+            [this](auto &buffer) {
+                int count = read(com_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
+                receivedSize_ += count;
+                return receivedSize_ >= buffer.size_;
+            });
+        if (!receiveTransfers_.empty()) {
+            // poll again if there are more receive transfers waiting
+            loop_.poll(*this, com_, POLLIN);
+            loop_.invoke(*this, rxTimeout_);
+        }
+        if (buffer != nullptr) {
+            buffer->setSuccess();
+            receivedSize_ = 0;
+            buffer->setReady();
+        }
     }
 }
 
@@ -224,10 +227,10 @@ bool Uart_io_uring::Buffer::start() {
     if ((op_ & Op::WRITE) == 0) {
         // read
         if (device.receiveTransfers_.push(*this))
-            device.loop_.poll(device.com_, POLLIN, &device);
+            device.loop_.poll(device, device.com_, POLLIN);
     } else {
         // write
-        if (!device.loop_.transfer(IORING_OP_WRITE, device.com_, 0, data_, size_, this)) {
+        if (!device.loop_.transfer(*this, IORING_OP_WRITE, device.com_, 0, data_, size_)) {
             // error: submit buffer full
             setError(std::errc::resource_unavailable_try_again);
             return false;
@@ -245,7 +248,7 @@ bool Uart_io_uring::Buffer::cancel() {
         return false;
 
     if (steps_ != 0) {
-        if (!device_.loop_.cancel(this)) {
+        if (!device_.loop_.cancel(*this)) {
             // error: submit buffer full
             setError(std::errc::resource_unavailable_try_again);
             return false;
@@ -255,7 +258,7 @@ bool Uart_io_uring::Buffer::cancel() {
     return true;
 }
 
-void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe) {
+void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe, int id) {
     auto result = cqe.res;
     if (result >= 0) {
         // success
@@ -265,7 +268,7 @@ void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe) {
 
             auto &device = device_;
             if (device.receiveTransfers_.push(*this))
-                device.loop_.poll(device.com_, POLLIN, this);
+                device.loop_.poll(device, device.com_, POLLIN);
         } else {
             // set success with transferred size
             setSuccess(result);

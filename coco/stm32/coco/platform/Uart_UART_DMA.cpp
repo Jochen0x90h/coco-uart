@@ -145,7 +145,7 @@ void Uart_UART_DMA::startRx(BufferBase &buffer) {
     volatile void *data = buffer.data_;
     rxChannel_
         .setDestinationAddress(data)
-        .setCount(buffer.capacity_)
+        .setCount(buffer.size_)
         .enable(dma::Config::TRANSFER_COMPLETE_INTERRUPT);
 
     // -> handleRx
@@ -241,6 +241,7 @@ void Uart_UART_DMA::handleTx() {
         auto &buffer = *b;
         if ((buffer.steps_ & int(BufferBase::Op::READ)) != 0) {
             // read after write
+            buffer.size_ = buffer.capacity_;
 
             // update flags for cancel()
             buffer.steps_ = int(BufferBase::Op::READ);
