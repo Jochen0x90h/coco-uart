@@ -32,7 +32,7 @@ bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<
     // configure
     setFormat(format); // also sets timeouts
     setBaudRate(baudRate);
-    rxTimeout_ = max(rxTimeout, 20ms);
+    rxTimeout_ = std::max(rxTimeout, 20ms);
 
     // set state
     state_ = State::READY;
@@ -94,7 +94,7 @@ void Uart_io_uring::setValue(int id, int value) {
             tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // raw input
             tio.c_oflag &= ~OPOST;                           // raw output
             tio.c_iflag &= ~(IXON | IXOFF | IXANY);          // no software flow control
-            
+
             // also set timeouts
             tio.c_cc[VMIN]  = 0; // wait for first character
             tio.c_cc[VTIME] = 0; // timeout
@@ -104,7 +104,7 @@ void Uart_io_uring::setValue(int id, int value) {
     case Value::BAUD:
         {
             baudRate_ = value;
-            
+
             termios2 tio;
             ioctl(com_, TCGETS2, &tio);
             tio.c_cflag = (tio.c_cflag & ~CBAUD) | BOTHER; // set other baud rate
@@ -223,7 +223,7 @@ bool Uart_io_uring::Buffer::start() {
     auto &device = device_;
 
     steps_ = int(op_ & Op::READ_WRITE);
-    
+
     if ((op_ & Op::WRITE) == 0) {
         // read
         if (device.receiveTransfers_.push(*this))

@@ -39,9 +39,11 @@ Coroutine echo(Loop &loop, Buffer &buffer) {
 #ifdef NATIVE
 // pass serial port device as argument, e.g. "\\\\.\\COM9"
 int main(int argc, char **argv) {
-    if (argc < 2)
+    if (argc < 2) {
+        std::cerr << "Error: No device specified" << std::endl;
         return 1;
-    drivers.init(argv[1]);
+    }
+    drivers.uart.setPath(argv[1]);
 #else
 int main() {
 #endif

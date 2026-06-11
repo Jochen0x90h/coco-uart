@@ -1,4 +1,5 @@
 #include <UartTest.hpp>
+#include <coco/Coroutine.hpp>
 #include <coco/Loop.hpp>
 #include <coco/debug.hpp>
 #include <coco/BufferWriter.hpp>
@@ -23,60 +24,73 @@ using namespace coco;
 // periodically send "Hello UART"
 Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
     int baudRate = 38400;
-    while (buffer.ready()) {
-        //uart.setOutputSignals(Uart::OutputSignals::DTR | Uart::OutputSignals::RTS);
+    while (true) {
+        // open the uart and wait until ready
+        uart.open();
+        debug::out << "Wait for serial port...\n";
+        co_await uart.untilReadyOrDisabled();
 
-        debug::out << "Send\n";
-        debug::toggleBlue();
+        while (buffer.ready()) {
+            //uart.setOutputSignals(Uart::OutputSignals::DTR | Uart::OutputSignals::RTS);
 
-        co_await buffer.write("Hello UART");
-        co_await loop.sleep(500ms);
+            debug::out << "Send\n";
+            debug::toggleBlue();
 
-        // toggle baud rate
-        uart.setBaudRate(baudRate);
-        baudRate ^= 100000 ^ 38400;
+            co_await buffer.write("Hello UART");
+            co_await loop.sleep(500ms);
+
+            // toggle baud rate
+            uart.setBaudRate(baudRate);
+            baudRate ^= 100000 ^ 38400;
+        }
     }
 
     // failed to open device or device stopped working
-    loop.exit();
+    //loop.exit();
 }
 
 // receive the "Hello UART" from send()
-Coroutine receive(Loop &loop, Buffer &buffer) {
-    while (buffer.ready()) {
-        // overwrite entire buffer
-        buffer.resize(buffer.capacity()).array<char>().fill('x');
+Coroutine receive(Loop &loop, Uart &uart, Buffer &buffer) {
+    while (true) {
+        // wait until ready
+        co_await uart.untilReady();
 
-        // start receiving
-        debug::out << "Receive\n";
-        buffer.startRead();
-        int r = co_await select(buffer.untilReadyOrDisabled(), loop.sleep(2s));
-        if (r == 1) {
-            // output received string to debug console
-            debug::out << "Received " << buffer.string();
+        while (buffer.ready()) {
+            // overwrite entire buffer
+            buffer.resize(buffer.capacity()).array<char>().fill('x');
 
-            if (buffer.string() == "Hello UART") {
-                // ok
-                debug::toggleGreen();
-                debug::clearRed();
+            // start receiving
+            debug::out << "Receive\n";
+            buffer.startRead();
+            int r = co_await select(buffer.untilReadyOrDisabled(), loop.sleep(2s));
+            if (r == 1) {
+                // output received string to debug console
+                debug::out << "Received " << buffer.string();
+
+                if (buffer.string() == "Hello UART") {
+                    // ok
+                    debug::toggleGreen();
+                    debug::clearRed();
+                } else {
+                    // error
+                    debug::toggleRed();
+                    debug::out << " (error: size " << dec(buffer.size()) << ")\n";
+                }
+                debug::out << '\n';
             } else {
-                // error
+                // timeout
+                debug::out << "Error: Timeout\n";
                 debug::toggleRed();
-                debug::out << " (error: size " << dec(buffer.size()) << ")\n";
+                buffer.cancel();
+                co_await buffer.untilReadyOrDisabled();
             }
-            debug::out << '\n';
-        } else {
-            // timeout
-            debug::out << "Error: Timeout\n";
-            debug::toggleRed();
-            buffer.cancel();
-            co_await buffer.untilReadyOrDisabled();
+
         }
     }
-    debug::set(debug::MAGENTA);
 
     // failed to open device or device stopped working
-    loop.exit();
+    //debug::set(debug::MAGENTA);
+    //loop.exit();
 }
 
 // detect change of serial state (DCD, DSR, RI)
@@ -101,17 +115,20 @@ Coroutine detect(Loop &loop, Uart &uart) {
 
 
 #ifdef NATIVE
-// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM9" or "/dev/ttyUSB0"
+// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM10" or "/dev/ttyUSB0"
 int main(int argc, char **argv) {
-    if (argc < 2)
+    if (argc < 2) {
+        std::cerr << "Error: No device specified" << std::endl;
         return 1;
-    drivers.init(argv[1]);
+    }
+    drivers.uart.setPath(argv[1]);
+    //drivers.init(argv[1]);
 #else
 int main() {
 #endif
     debug::out << "UartTest\n";
 
-    receive(drivers.loop, drivers.receiveBuffer);
+    receive(drivers.loop, drivers.uart, drivers.receiveBuffer);
     send(drivers.loop, drivers.uart, drivers.sendBuffer);
     detect(drivers.loop, drivers.uart);
 

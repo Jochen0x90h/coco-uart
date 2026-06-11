@@ -63,6 +63,11 @@ Uart_UARTE_TIMER::BufferBase &Uart_UARTE_TIMER::getBuffer(int index) {
     return buffers_.get(index);
 }
 
+bool Uart_UARTE_TIMER::open() {
+    // device is always open
+    return false;
+}
+
 void Uart_UARTE_TIMER::setValue(int id, int value) {
     switch (id) {
     case Value::FORMAT:

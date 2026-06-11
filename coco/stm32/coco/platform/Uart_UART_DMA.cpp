@@ -58,6 +58,11 @@ Uart_UART_DMA::BufferBase &Uart_UART_DMA::getBuffer(int index) {
     return buffers_.get(index);
 }
 
+bool Uart_UART_DMA::open() {
+    // device is always open
+    return false;
+}
+
 void Uart_UART_DMA::setValue(int id, int value) {
     switch (id) {
     case Value::FORMAT:

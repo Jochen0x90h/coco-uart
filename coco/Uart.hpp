@@ -4,6 +4,9 @@
 #include <coco/Frequency.hpp>
 #include <coco/String.hpp>
 #include <cstdint>
+#ifdef NATIVE
+#include <filesystem>
+#endif
 
 
 namespace coco {
@@ -105,6 +108,32 @@ public:
 
     Uart(State state) : BufferDevice(state) {}
 
+#ifdef NATIVE
+    /// @brief Set the device path.
+    /// For example "\\\\.\\COM10" or "/dev/ttyUSB0".
+    /// When the device is ready (Device::State::READY), call close() and open() for the new path to take effect.
+    /// @param path Path to set
+    virtual void setPath(const std::filesystem::path &path) = 0;
+
+    void setPath(String path) {
+        std::filesystem::path p(std::u8string_view(reinterpret_cast<const char8_t *>(path.data()), path.size()));
+        setPath(p);
+    }
+
+    template <typename T> requires (StringConcept<T>)
+    void setPath(const T &path) {
+        setPath(String(path));
+    }
+#endif
+
+    /// @brief Open the UART device.
+    /// On Microcontrollers, the UART can be permanently in READY state and calling open() not necessary.
+    /// On operating systems (Windows, Linux, MacOS), setPath() needs to be called before open(). Then, a state change
+    /// to OPENING occurs immediately and a state change to READY when the device was opened (e.g. after it was plugged
+    /// in).
+    /// @return true if a state change happened.
+    virtual bool open() = 0;
+
     /// @brief Set a configuration or state value.
     /// @param id id of value to change, either pre-defined or implementation specific
     /// @param value value to set
@@ -149,7 +178,7 @@ public:
 
     /// @brief Wait until input control signals changed (e.g. InputSignals::DSR or InputSignals::RI)
     /// @return use co_await on return value to wait until the input control signals change
-    [[nodiscard]] Awaitable<Events> untilSignalsChanged() {
+    [[nodiscard]] Awaitable<CoroutineTask<Events>> untilSignalsChanged() {
         return {this->tasks_, Events::SIGNALS_CHANGED};
     }
 
