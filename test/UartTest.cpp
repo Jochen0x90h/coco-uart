@@ -94,7 +94,7 @@ Coroutine receive(Loop &loop, Uart &uart, Buffer &buffer) {
 }
 
 // detect change of serial state (DCD, DSR, RI)
-Coroutine detect(Loop &loop, Uart &uart) {
+Coroutine state(Loop &loop, Uart &uart) {
     while (true) {
         co_await uart.untilSignalsChanged();
         auto signals = uart.getInputSignals();
@@ -115,22 +115,21 @@ Coroutine detect(Loop &loop, Uart &uart) {
 
 
 #ifdef NATIVE
-// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "\\\\.\\COM10" or "/dev/ttyUSB0"
+// Windows/Linux/MacOS: Pass serial port device as argument, e.g. "COM10" or "ttyUSB0"
 int main(int argc, char **argv) {
     if (argc < 2) {
         std::cerr << "Error: No device specified" << std::endl;
         return 1;
     }
     drivers.uart.setPath(argv[1]);
-    //drivers.init(argv[1]);
 #else
 int main() {
 #endif
     debug::out << "UartTest\n";
 
-    receive(drivers.loop, drivers.uart, drivers.receiveBuffer);
+    //receive(drivers.loop, drivers.uart, drivers.receiveBuffer);
     send(drivers.loop, drivers.uart, drivers.sendBuffer);
-    detect(drivers.loop, drivers.uart);
+    state(drivers.loop, drivers.uart);
 
     drivers.loop.run();
 

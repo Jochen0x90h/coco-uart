@@ -50,6 +50,7 @@ board_test(UartEchoTest coco-devboards::stm32f3348discovery)
 board_test(UartEchoTest coco-devboards::nucleo-g431rb)
 board_test(UartEchoTest coco-devboards::nucleo-g474re)
 
+board_test(UartWriteReadTest coco-devboards::native)
 board_test(UartWriteReadTest coco-devboards::nucleo-g474re)
 
 board_test(Rs485SendTest coco-devboards::stm32f0discovery)

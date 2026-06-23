@@ -8,7 +8,7 @@
 
 
 /*
-    This test periodically sends "Hello UART" and waits for a reply. Needs two connected serial ports.
+    This test periodically sends "Hello UART" on one UART and waits for a reply. A second UART connected to the first UART echos everything it receives.
     For two RS-232 ports with 9-pin D-Sub connector, connect pin 2 of the first port to pin 3 of the second port and pin 3 of the first port to pin 2 of the second port.
     On embedded platforms, connect TX 1 to RX 2 and TX 2 to TX 1. The green LED toggles every half second if everything is ok.
 */
@@ -57,11 +57,14 @@ Coroutine echo(Loop &loop, Buffer &buffer) {
 }
 
 #ifdef NATIVE
-// pass two serial port devices as arguments, e.g. "\\\\.\\COM9" "\\\\.\\COM10"
+// Windows/Linux/MacOS: Pass serial ports device as arguments, e.g. "COM10", "COM11" or "ttyUSB0", "ttyUSB1"
 int main(int argc, char **argv) {
-    if (argc < 3)
+    if (argc < 3) {
+        std::cerr << "Error: No devices specified" << std::endl;
         return 1;
-    drivers.init(argv[1], argv[2]);
+    }
+    drivers.uart1.setPath(argv[1]);
+    drivers.uart2.setPath(argv[2]);
 #else
 int main() {
 #endif

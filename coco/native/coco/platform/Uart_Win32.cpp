@@ -34,7 +34,11 @@ Uart_Win32::~Uart_Win32() {
 }
 
 void Uart_Win32::setPath(const std::filesystem::path &path) {
-    path_ = path;
+    if (path.is_absolute())
+        path_.clear();
+    else
+        path_ = "\\\\.\\";
+    path_ += path;
 }
 
 bool Uart_Win32::open() { //String name, Format format, int baudRate, Milliseconds<> rxTimeout) {
@@ -63,31 +67,32 @@ void Uart_Win32::setValue(int id, int value) {
 
     switch (id) {
     case Value::FORMAT:
-        {
+        format_ = Format(value);
+        if (file_ != INVALID_HANDLE_VALUE) {
             DCB dcb;
             dcb.DCBlength = sizeof(dcb);
             GetCommState(file_, &dcb);
-            applyFormat(dcb, format_ = Format(value));
+            applyFormat(dcb, format_);
             SetCommState(file_, &dcb);
         }
         break;
     case Value::BAUD:
-        {
+        baudRate_ = value;
+        if (file_ != INVALID_HANDLE_VALUE) {
             DCB dcb;
             dcb.DCBlength = sizeof(dcb);
             GetCommState(file_, &dcb);
-            dcb.BaudRate = baudRate_ = value;
+            dcb.BaudRate = baudRate_;
             SetCommState(file_, &dcb);
         }
         break;
     case Value::RX_TIMEOUT:
-        {
-            // calc timeout in milliseconds
-            int rxTimeout = std::max(value * 1000 / baudRate_ + 1, 20);
-
+        // calc timeout in milliseconds
+        rxTimeout_.value = std::max(value * 1000 / baudRate_ + 1, 20);
+        if (file_ != INVALID_HANDLE_VALUE) {
             // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcommtimeouts
             COMMTIMEOUTS timeouts;
-            timeouts.ReadIntervalTimeout = rxTimeout;
+            timeouts.ReadIntervalTimeout = rxTimeout_.value;
             timeouts.ReadTotalTimeoutMultiplier = 0;
             timeouts.ReadTotalTimeoutConstant = 0;
             timeouts.WriteTotalTimeoutMultiplier = 0;
@@ -97,7 +102,7 @@ void Uart_Win32::setValue(int id, int value) {
         break;
     case Value::OUTPUT_SIGNALS:
         // http://www.ioctls.net/
-        {
+        if (file_ != INVALID_HANDLE_VALUE) {
             bool dtr = (OutputSignals(value) & OutputSignals::DTR) != 0;
             bool rts = (OutputSignals(value) & OutputSignals::RTS) != 0;
 

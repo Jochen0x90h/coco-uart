@@ -110,7 +110,8 @@ public:
 
 #ifdef NATIVE
     /// @brief Set the device path.
-    /// For example "\\\\.\\COM10" or "/dev/ttyUSB0".
+    /// If it is a relative path, it is made absolute
+    /// Windows "COM10" is "\\\\.\\COM10", Linux: "ttyUSB0" is "/dev/ttyUSB0".
     /// When the device is ready (Device::State::READY), call close() and open() for the new path to take effect.
     /// @param path Path to set
     virtual void setPath(const std::filesystem::path &path) = 0;
