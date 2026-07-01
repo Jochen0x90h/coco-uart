@@ -22,14 +22,14 @@ public:
 
     ~Uart_io_uring() override;
 
-    /// @brief Open device by name.
-    /// Fails if already open. Calling close() is ok if the uart is not open.
-    /// @param name Device name (e.g. "/dev/ttyUSB0")
+    /// @brief Open device by path.
+    /// Fails if already open. Calling close() does nothing if the uart is not open.
+    /// @param path Device path (e.g. "/dev/ttyUSB0")
     /// @param format Data format (number of data and stop bits)
     /// @param baudRate Baud Rate
     /// @param rxTimeout Receive timeout (min. 20ms)
     /// @return true if successful
-    bool open(String name, Format format, int baudRate, Milliseconds<> rxTimeout);
+    bool open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout);
 
     // Uart methods
     void setValue(int id, int value) override;

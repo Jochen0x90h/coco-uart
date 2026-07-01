@@ -14,13 +14,12 @@ Uart_io_uring::~Uart_io_uring() {
     ::close(com_);
 }
 
-bool Uart_io_uring::open(String name, Format format, int baudRate, Milliseconds<> rxTimeout) {
+bool Uart_io_uring::open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout) {
     if (com_ != INVALID_HANDLE_VALUE)
         return false;
 
     // open file
-    std::string n(name);
-    int com = ::open(n.c_str(), O_RDWR | O_NOCTTY);
+    int com = ::open(path.c_str(), O_RDWR | O_NOCTTY);
     if (com == INVALID_HANDLE_VALUE) {
         int error = errno;
         setSystemError(error);

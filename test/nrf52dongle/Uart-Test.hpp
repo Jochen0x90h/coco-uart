@@ -8,7 +8,7 @@
 using namespace coco;
 
 
-/// @brief Drivers for UartSendTest
+/// @brief Drivers for Uart-Test
 /// Board: https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/hardware/
 /// Connect RX and TX to test the loopback
 struct Drivers {

@@ -8,8 +8,8 @@
 using namespace coco;
 
 
-/// @brief Drivers for UartSendTest
-/// Board: https://www.st.com/en/evaluation-tools/nucleo-g474re.html
+/// @brief Drivers for Uart-Test
+/// Board: https://www.st.com/en/evaluation-tools/nucleo-h503rb.html
 /// Connect RX and TX to test the loopback
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
@@ -17,18 +17,12 @@ struct Drivers {
     using Uart = Uart_UART_DMA;
     Uart uart{loop,
         // use USART1
-        gpio::PA10 | gpio::AF7 | gpio::Config::PULL_UP, // USART1 RX (CN9 3)
-        gpio::PA9 | gpio::AF7, // USART1 TX (CN5 1)
-        gpio::PA12 | gpio::AF7, // USART1 DE (CN10 12), only for testing, DE signal has no function
+        gpio::PB15 | gpio::AF4 | gpio::Config::PULL_UP, // USART1 RX (CN9 1)
+        gpio::PB14 | gpio::AF4, // USART1 TX (CN9 2)
+        //gpio::PA12 | gpio::AF7, // USART1 DE (CN10 12), only for testing, DE signal has no function
         USART1_CLOCK,
         uart::USART1_INFO,
-        dma::DMA1_CH1_CH2_INFO,
-
-        // use USART3
-        //gpio::PB8 | gpio::AF7, // USART3 RX (CN5 10)
-        //gpio::PB9 | gpio::AF7, // USART3 TX (CN5 9)
-        //uart::USART3_INFO,
-        //dma::DMA1_CH1_CH2_INFO,
+        dma::DMA1_CH0_CH1_INFO,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,
@@ -43,10 +37,9 @@ Drivers drivers;
 // Interrupt handlers (check in startup code if the handler name exists to prevent typos)
 extern "C" {
 void USART1_IRQHandler() {
-//void USART3_IRQHandler() {
     drivers.uart.UART_IRQHandler();
 }
-void DMA1_Channel1_IRQHandler() {
+void GPDMA1_Channel0_IRQHandler() {
     drivers.uart.DMA_Rx_IRQHandler();
 }
 }

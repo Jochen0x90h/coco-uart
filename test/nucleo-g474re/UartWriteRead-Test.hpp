@@ -9,7 +9,7 @@ using namespace coco;
 
 
 /**
- * Drivers for UartWriteReadTest
+ * Drivers for UartWriteRead-Test
  * Board: https://www.st.com/resource/en/user_manual/dm00556337-stm32g4-nucleo-64-boards-mb1367-stmicroelectronics.pdf
  * Connect as follows:
  * CN5 1 -> CN5 10

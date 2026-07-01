@@ -9,7 +9,7 @@ using namespace coco;
 
 
 
-/// @brief Drivers for UartSendTest
+/// @brief Drivers for UartWriteRead-Test
 /// Linux/Ubuntu: sudo usermod -aG dialout $USER (then restart)
 struct Drivers {
     Loop_native loop;

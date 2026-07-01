@@ -1,4 +1,4 @@
-#include <UartTest.hpp>
+#include <Uart-Test.hpp>
 #include <coco/Coroutine.hpp>
 #include <coco/Loop.hpp>
 #include <coco/debug.hpp>
@@ -25,10 +25,9 @@ using namespace coco;
 Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
     int baudRate = 38400;
     while (true) {
-        // open the uart and wait until ready
-        uart.open();
+        // wait until port is ready
         debug::out << "Wait for serial port...\n";
-        co_await uart.untilReadyOrDisabled();
+        co_await uart.untilReady();
 
         while (buffer.ready()) {
             //uart.setOutputSignals(Uart::OutputSignals::DTR | Uart::OutputSignals::RTS);
@@ -40,8 +39,8 @@ Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
             co_await loop.sleep(500ms);
 
             // toggle baud rate
-            uart.setBaudRate(baudRate);
-            baudRate ^= 100000 ^ 38400;
+            //uart.setBaudRate(baudRate);
+            //baudRate ^= 100000 ^ 38400;
         }
     }
 
@@ -52,7 +51,7 @@ Coroutine send(Loop &loop, Uart &uart, Buffer &buffer) {
 // receive the "Hello UART" from send()
 Coroutine receive(Loop &loop, Uart &uart, Buffer &buffer) {
     while (true) {
-        // wait until ready
+        // wait until port is ready
         co_await uart.untilReady();
 
         while (buffer.ready()) {
@@ -79,10 +78,11 @@ Coroutine receive(Loop &loop, Uart &uart, Buffer &buffer) {
                 debug::out << '\n';
             } else {
                 // timeout
-                debug::out << "Error: Timeout\n";
+                debug::out << "Error: Receive Timeout\n";
                 debug::toggleRed();
                 buffer.cancel();
                 co_await buffer.untilReadyOrDisabled();
+                debug::out << "Receive canceled\n";
             }
 
         }
@@ -121,13 +121,22 @@ int main(int argc, char **argv) {
         std::cerr << "Error: No device specified" << std::endl;
         return 1;
     }
-    drivers.uart.setPath(argv[1]);
+    std::filesystem::path devicePath(argv[1]);
+
+    // add listener that opens the uart given as command line argument as soon as it appears
+    drivers.monitor.listenAdd([&](const std::filesystem::path &path, String name) {
+        debug::out << "Serial device added: " << name << " (" << path.string() << ")\n";
+
+        if (path == devicePath)
+            drivers.uart.open(path, Uart::Format::DEFAULT, 38400, 20ms);
+    });
+
 #else
 int main() {
 #endif
     debug::out << "UartTest\n";
 
-    //receive(drivers.loop, drivers.uart, drivers.receiveBuffer);
+    receive(drivers.loop, drivers.uart, drivers.receiveBuffer);
     send(drivers.loop, drivers.uart, drivers.sendBuffer);
     state(drivers.loop, drivers.uart);
 

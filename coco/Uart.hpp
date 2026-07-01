@@ -107,7 +107,7 @@ public:
 
 
     Uart(State state) : BufferDevice(state) {}
-
+/*
 #ifdef NATIVE
     /// @brief Set the device path.
     /// If it is a relative path, it is made absolute
@@ -125,7 +125,7 @@ public:
     void setPath(const T &path) {
         setPath(String(path));
     }
-#endif
+#endif*/
 
     /// @brief Open the UART device.
     /// On Microcontrollers, the UART can be permanently in READY state and calling open() not necessary.
@@ -133,7 +133,7 @@ public:
     /// to OPENING occurs immediately and a state change to READY when the device was opened (e.g. after it was plugged
     /// in).
     /// @return true if a state change happened.
-    virtual bool open() = 0;
+    //virtual bool open() = 0;
 
     /// @brief Set a configuration or state value.
     /// @param id id of value to change, either pre-defined or implementation specific

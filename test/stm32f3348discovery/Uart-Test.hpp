@@ -3,26 +3,27 @@
 #include <coco/platform/Loop_TIM2.hpp>
 #include <coco/platform/Uart_UART_DMA.hpp>
 #include <coco/board/config.hpp>
+#include <coco/debug.hpp>
 
 
 using namespace coco;
 
 
-/// @brief Drivers for UartSendTest
-/// Board: https://www.st.com/en/evaluation-tools/nucleo-h503rb.html
-/// Connect RX and TX to test the loopback
+/// @brief Drivers for UartSend-Test
+/// Board: https://www.st.com/en/evaluation-tools/32f3348discovery.html
+/// Connect RX and TX to test the loopback:
+/// PA9 -> PA10
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
 
     using Uart = Uart_UART_DMA;
     Uart uart{loop,
         // use USART1
-        gpio::PB15 | gpio::AF4 | gpio::Config::PULL_UP, // USART1 RX (CN9 1)
-        gpio::PB14 | gpio::AF4, // USART1 TX (CN9 2)
-        //gpio::PA12 | gpio::AF7, // USART1 DE (CN10 12), only for testing, DE signal has no function
+        gpio::PA10 | gpio::AF7, // USART1 RX (PA10)
+        gpio::PA9 | gpio::AF7, // USART1 TX (PA9)
         USART1_CLOCK,
         uart::USART1_INFO,
-        dma::DMA1_CH0_CH1_INFO,
+        dma::DMA1_CH5_CH4_INFO,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,
@@ -39,7 +40,7 @@ extern "C" {
 void USART1_IRQHandler() {
     drivers.uart.UART_IRQHandler();
 }
-void GPDMA1_Channel0_IRQHandler() {
+void DMA1_Channel5_IRQHandler() {
     drivers.uart.DMA_Rx_IRQHandler();
 }
 }

@@ -8,7 +8,7 @@
 using namespace coco;
 
 
-// drivers for Rs485Test
+// drivers for Rs485Send-Test
 // board: https://www.st.com/en/evaluation-tools/stm32f0discovery.html
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
