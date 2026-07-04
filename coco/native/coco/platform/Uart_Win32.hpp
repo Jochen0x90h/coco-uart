@@ -10,24 +10,26 @@ namespace coco {
 /// The COM-Port can appear and disappear e.g. when it is a USB device. The device goes to Device::State::DISABLED
 /// when the COM-Port disappears. When open() is called, the device immediately goes to Device::State::OPENING and
 /// eventually to Device::State::READY when the COM-Port appears again.
-class Uart_Win32 : public Uart, public Loop_Win32::TimeoutHandler, public Loop_Win32::CompletionHandler {
+class Uart_Win32 : public Uart, public Loop_Win32::CompletionHandler {
 public:
     /// @brief Constructor/
     /// @param loop event loop
-    /// @param baudRate baud rate (e.g. 38400)
-    /// @param format frame format
-    /// @param rxTimeout receiver timeout in milliseconds, at least ~20ms (note that setRxTimeout() is in bit times)
-    Uart_Win32(Loop_Win32 &loop, Format format, int baudRate, Milliseconds<> rxTimeout)
+    Uart_Win32(Loop_Win32 &loop)
         : Uart(State::DISABLED)
-        , loop_(loop)
-        , format_(format), baudRate_(baudRate), rxTimeout_(rxTimeout) {}
+        , loop_(loop) {}
 
     ~Uart_Win32() override;
 
+    /// @brief Open device by path.
+    /// Fails if already open. Calling close() does nothing if the uart is not open.
+    /// @param path Device path (e.g. "/dev/ttyUSB0")
+    /// @param format Data format (number of data and stop bits)
+    /// @param baudRate Baud Rate
+    /// @param rxTimeout Receive timeout (min. 20ms)
+    /// @return true if successful
+    bool open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout);
+
     // Uart methods
-    void setPath(const std::filesystem::path &path) override;
-    using Uart::setPath;
-    bool open() override;
     void setValue(int id, int value) override;
     int getValue(int id) override;
 
@@ -60,17 +62,14 @@ public:
     };
 
 protected:
-    void onTimeout() override;
     void onCompletion(OVERLAPPED *overlapped) override;
 
     Loop_Win32 &loop_;
-    Format format_;
     int baudRate_;
-    Milliseconds<> rxTimeout_;
-    std::filesystem::path path_;
+    int rxTimeout_;
 
-    // file handle
-    HANDLE file_ = INVALID_HANDLE_VALUE;
+    // COM port handle
+    HANDLE com_ = INVALID_HANDLE_VALUE;
 
     // overlapped for monitoring events (e.g. change of DSR signal)
     OVERLAPPED overlapped_;

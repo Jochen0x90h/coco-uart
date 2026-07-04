@@ -7,26 +7,26 @@ namespace coco {
 
 namespace {
 
-const char *subsystem = "tty";
-const char *devtype = nullptr;
+    const char *subsystem = "tty";
+    const char *devtype = nullptr;
 
-bool filter(struct udev_device *dev) {
-    struct udev_device *parent = udev_device_get_parent(dev);
-    if (!parent)
-        return false;
-    const char *driver = udev_device_get_driver(parent);
-    if (!driver)
-        return false;
-    if (String(driver) == "port") {
-        auto iomem = udev_device_get_sysattr_value(dev, "iomem_base");
-        auto irq = udev_device_get_sysattr_value(dev, "irq");
-        if (iomem == nullptr || irq == nullptr)
+    bool filter(struct udev_device *dev) {
+        struct udev_device *parent = udev_device_get_parent(dev);
+        if (!parent)
             return false;
-        if (String(iomem) == "0x0" || String(irq) == "0")
+        const char *driver = udev_device_get_driver(parent);
+        if (!driver)
             return false;
+        if (String(driver) == "port") {
+            auto iomem = udev_device_get_sysattr_value(dev, "iomem_base");
+            auto irq = udev_device_get_sysattr_value(dev, "irq");
+            if (iomem == nullptr || irq == nullptr)
+                return false;
+            if (String(iomem) == "0x0" || String(irq) == "0")
+                return false;
+        }
+        return true;
     }
-    return true;
-}
 
 } // namespace
 
@@ -60,7 +60,7 @@ void UartMonitor_udev::listenAdd(std::function<void (const std::filesystem::path
         udev_list_entry_foreach(entry, devices) {
             const char* path = udev_list_entry_get_name(entry);
             struct udev_device* dev = udev_device_new_from_syspath(udev, path);
-            if (dev) {                
+            if (dev) {
                 const char* devnode = udev_device_get_devnode(dev);
                 struct udev_device *parent = udev_device_get_parent(dev);
                 if (devnode && filter(dev)) {

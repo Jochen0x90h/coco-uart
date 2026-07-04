@@ -13,9 +13,6 @@ class Uart_io_uring : public Uart, public Loop_io_uring::CompletionHandler, publ
 public:
     /// @brief Constructor/
     /// @param loop event loop
-    /// @param baudRate baud rate (e.g. 38400)
-    /// @param format frame format
-    /// @param rxTimeout receiver timeout in milliseconds, at least ~20ms (note that setRxTimeout() is in bit times)
     Uart_io_uring(Loop_io_uring &loop)
         : Uart(State::DISABLED)
         , loop_(loop) {}
@@ -72,7 +69,7 @@ protected:
     int baudRate_ = 0;
     Milliseconds<> rxTimeout_;
 
-    // file handle
+    // COM port handle
     static constexpr int INVALID_HANDLE_VALUE = -1;
     int com_ = INVALID_HANDLE_VALUE;
 

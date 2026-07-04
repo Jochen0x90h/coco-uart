@@ -1,9 +1,9 @@
 #pragma once
 
 #ifdef _WIN32
-#include "UartMonitor_WinUSB.hpp"
+#include "UartMonitor_SetupAPI.hpp"
 namespace coco {
-using UartMonitor_native = UartMonitor_WinUSB;
+using UartMonitor_native = UartMonitor_SetupAPI;
 }
 #endif
 #ifdef __linux__

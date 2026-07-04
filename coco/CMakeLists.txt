@@ -15,12 +15,14 @@ if(${PLATFORM} STREQUAL "native" OR ${PLATFORM} STREQUAL "emu")
             native/coco/platform/UartMonitor_native.hpp
     )
     if(WIN32)
-        # IOCP
+        # Win32/IOCP/SetupAPI
         target_sources(${PROJECT_NAME}
             PUBLIC FILE_SET platform_headers FILES
                 native/coco/platform/Uart_Win32.hpp
+                native/coco/platform/UartMonitor_SetupAPI.hpp
             PRIVATE
                 native/coco/platform/Uart_Win32.cpp
+                native/coco/platform/UartMonitor_SetupAPI.cpp
         )
     elseif(LINUX)
         # io_uring
@@ -63,6 +65,9 @@ target_link_libraries(${PROJECT_NAME}
     coco-loop::coco-loop
     coco-device::coco-device
 )
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} SetupAPI)
+endif()
 if(LINUX)
     target_link_libraries(${PROJECT_NAME} libudev::libudev)
 endif()

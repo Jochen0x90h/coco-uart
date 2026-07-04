@@ -18,7 +18,7 @@ bool Uart_io_uring::open(const std::filesystem::path &path, Format format, int b
     if (com_ != INVALID_HANDLE_VALUE)
         return false;
 
-    // open file
+    // open com port
     int com = ::open(path.c_str(), O_RDWR | O_NOCTTY);
     if (com == INVALID_HANDLE_VALUE) {
         int error = errno;

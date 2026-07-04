@@ -121,13 +121,12 @@ int main(int argc, char **argv) {
         std::cerr << "Error: No device specified" << std::endl;
         return 1;
     }
-    std::filesystem::path devicePath(argv[1]);
 
     // add listener that opens the uart given as command line argument as soon as it appears
     drivers.monitor.listenAdd([&](const std::filesystem::path &path, String name) {
         debug::out << "Serial device added: " << name << " (" << path.string() << ")\n";
 
-        if (path == devicePath)
+        if (name == argv[1])
             drivers.uart.open(path, Uart::Format::DEFAULT, 38400, 20ms);
     });
 
