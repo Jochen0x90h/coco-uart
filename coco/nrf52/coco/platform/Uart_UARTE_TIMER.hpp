@@ -48,7 +48,6 @@ public:
     BufferBase &getBuffer(int index);
 
     // Uart methods
-    bool open() override;
     void setValue(int id, int value) override; // Note: Format only supports 8 data bits, no/even parity and 1/2 stop bits
     int getValue(int id) override;
 

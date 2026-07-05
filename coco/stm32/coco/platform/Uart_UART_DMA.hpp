@@ -89,7 +89,6 @@ public:
     BufferBase &getBuffer(int index) override;
 
     // Uart methods
-    bool open() override;
     void setValue(int id, int value) override;
     int getValue(int id) override;
 
