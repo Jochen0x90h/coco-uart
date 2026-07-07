@@ -17,18 +17,19 @@ struct Drivers {
     using Uart = Uart_UART_DMA;
     Uart uart{loop,
         // use USART1
+        uart::USART1_INFO,
         gpio::PA10 | gpio::AF7 | gpio::Config::PULL_UP, // USART1 RX (CN9 3)
         gpio::PA9 | gpio::AF7, // USART1 TX (CN5 1)
         gpio::PA12 | gpio::AF7, // USART1 DE (CN10 12), only for testing, DE signal has no function
-        USART1_CLOCK,
-        uart::USART1_INFO,
         dma::DMA1_CH1_CH2_INFO,
+        USART1_CLOCK,
 
         // use USART3
+        //uart::USART3_INFO,
         //gpio::PB8 | gpio::AF7, // USART3 RX (CN5 10)
         //gpio::PB9 | gpio::AF7, // USART3 TX (CN5 9)
-        //uart::USART3_INFO,
         //dma::DMA1_CH1_CH2_INFO,
+        //USART3_CLOCK,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,

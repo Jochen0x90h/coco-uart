@@ -7,9 +7,8 @@ namespace coco {
 
 // Uart_UART_DMA
 
-Uart_UART_DMA::Uart_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin,
-    Hertz<> clock, const UartInfo &uartInfo, const DmaInfo &dmaInfo,
-    uart::Config config, uart::Format format, int baudRate, int rxTimeout)
+Uart_UART_DMA::Uart_UART_DMA(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+    const DmaInfo &dmaInfo, Hertz<> clock, uart::Config config, uart::Format format, int baudRate, int rxTimeout)
     : Uart(State::READY)
     , loop_(loop)
     , clock_(clock)

@@ -8,23 +8,21 @@
 using namespace coco;
 
 
-/**
- * Drivers for UartWriteRead-Test
- * Board: https://www.st.com/resource/en/user_manual/dm00556337-stm32g4-nucleo-64-boards-mb1367-stmicroelectronics.pdf
- * Connect as follows:
- * CN5 1 -> CN5 10
- * CN5 9 -> CN9 3
- */
+/// @brief Drivers for UartWriteRead-Test
+/// Board: https://www.st.com/resource/en/user_manual/dm00556337-stm32g4-nucleo-64-boards-mb1367-stmicroelectronics.pdf
+/// Connect as follows:
+/// CN5 1 -> CN5 10
+/// CN5 9 -> CN9 3
 struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
 
     using Uart = Uart_UART_DMA;
     Uart uart1{loop,
+        uart::USART1_INFO,
         gpio::PA10 | gpio::AF7, // USART1 RX (CN9 3)
         gpio::PA9 | gpio::AF7, // USART1 TX (CN5 1)
-        USART1_CLOCK,
-        uart::USART1_INFO,
         dma::DMA1_CH1_CH2_INFO,
+        USART1_CLOCK,
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,
         38400, // baud rate
@@ -32,11 +30,11 @@ struct Drivers {
     Uart::Buffer<128> buffer1{uart1};
 
     Uart uart2{loop,
+        uart::USART3_INFO,
         gpio::PB8 | gpio::AF7, // USART3 RX (CN5 10)
         gpio::PB9 | gpio::AF7, // USART3 TX (CN5 9)
-        USART3_CLOCK,
-        uart::USART3_INFO,
         dma::DMA1_CH3_CH4_INFO,
+        USART3_CLOCK,
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,
         38400, // baud rate

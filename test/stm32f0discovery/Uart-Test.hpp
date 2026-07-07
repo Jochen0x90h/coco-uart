@@ -18,18 +18,19 @@ struct Drivers {
 
     using Uart = Uart_UART_DMA;
     Uart uart{loop,
+        uart::USART1_INFO,
         gpio::PA10 | gpio::AF1 | gpio::Config::PULL_UP, // USART1 RX (PA10)
         gpio::PA9 | gpio::AF1, // USART1 TX (PA9)
-        USART1_CLOCK,
-        uart::USART1_INFO,
         dma::DMA1_CH3_CH2_INFO,
         //dma::DMA1_CH5_CH4_INFO,
+        USART1_CLOCK,
 
         // USART2 has no receiver timeout
-        //gpio::PA(3, 1), // USART2 RX
-        //gpio::PA(2, 1), // USART2 TX
         //uart::USART2_INFO,
+        //gpio::PA3 | gpio::AF1, // USART2 RX
+        //gpio::PA2 | gpio::AF1, // USART2 TX
         //dma::DMA1_CH5_CH4_INFO,
+        //USART2_CLOCK,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,

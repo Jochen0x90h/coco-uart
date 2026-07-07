@@ -24,12 +24,12 @@ protected:
 public:
     /// Constructor
     /// @param loop Event loop
+    /// @param uartInfo Info of USART/UART instance to use
     /// @param rxPin Receive pin (RX), alternative function (see data sheet) and configuration (e.g. PULL_UP, INVERT, can be NONE)
     /// @param txPin Rransmit pin (TX), alternative function (see data sheet) and configuration (e.g. INVERT, can be NONE)
     /// @param dePin Data enable pin (DE) and configuration (e.g. INVERT), can be any GPIO
-    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
-    /// @param uartInfo Info of USART/UART instance to use
     /// @param dmaInfo Info of DMA channels to use
+    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
     /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
     /// @param baudRate Baud rate (e.g. 38400)
@@ -37,7 +37,8 @@ public:
     Rs485_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, gpio::Config dePin,
         Hertz<> clock, const UartInfo &uartInfo, const dma::DualInfo<> &dmaInfo,
         uart::Config config, uart::Format format, int baudRate, int rxTimeout)
-        : Uart_UART_DMA(loop, rxPin, txPin, clock, uartInfo, dmaInfo, configDe(config, dePin), format, baudRate, rxTimeout)
+        : Uart_UART_DMA(loop, uartInfo, rxPin, txPin, dmaInfo, clock, configDe(config, dePin), format, baudRate,
+        rxTimeout)
         , dePin_(dePin)
     {}
 

@@ -14,13 +14,13 @@ struct Drivers {
     Loop_TIM2 loop{APB1_TIMER_CLOCK};
     Rs485_UART_DMA rs485{loop,
         // use USART1
+        uart::USART1_INFO,
         gpio::PA10 | gpio::AF1, // USART1 RX (PA10)
         gpio::PA9 | gpio::AF1, // USART1 TX (PA9)
         gpio::PA8, // DE (PA8)
-        USART1_CLOCK,
-        uart::USART1_INFO,
         dma::DMA1_CH3_CH2_INFO,
         //dma::DMA1_CH5_CH4_INFO,
+        USART1_CLOCK,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,

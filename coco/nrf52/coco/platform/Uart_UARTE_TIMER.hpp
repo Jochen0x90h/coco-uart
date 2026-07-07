@@ -28,16 +28,18 @@ public:
 
     /// @brief Constructor with only RX and TX pins.
     /// @param loop event loop
-    /// @param rxPin receive pin (RX) and configuration (e.g. PULL_UP, can be NONE)
-    /// @param txPin transmit pin (TX) pin (e.g. DRIVE_H0H1, can be NONE)
-    /// @param instances instances to use
-    /// @param ppiChannels two ppi channels
-    /// @param baudRate baud rate
+    /// @param uartInfo Info of UART instance to use
+    /// @param rxPin Receive pin (RX) and configuration (e.g. PULL_UP, can be NONE)
+    /// @param txPin Transmit pin (TX) pin (e.g. DRIVE_H0H1, can be NONE)
+    /// @param timerInfo Info of timer instance to use
+    /// @param ppiChannels Two ppi channels
     /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
-    /// @param rxTimeout receive timeout in bit times
-    Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, const UartInfo &uartInfo, const timer::Info &timerInfo,
-        ppi::DualChannel ppiChannels, uart::Config config, uart::Format format, int baudRate, int rxTimeout);
+    /// @param baudRate Baud rate
+    /// @param rxTimeout Receive timeout in bit times
+    Uart_UARTE_TIMER(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+        const timer::Info &timerInfo, ppi::DualChannel ppiChannels, uart::Config config, uart::Format format,
+        int baudRate, int rxTimeout);
 
     ~Uart_UARTE_TIMER() override;
 

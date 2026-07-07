@@ -17,9 +17,9 @@ struct Drivers {
     using Uart = Uart_UARTE_TIMER;
     Uart uart{loop,
         // use UARTE1
+        uart::UARTE1_INFO,
         gpio::P0_2 | gpio::Config::PULL_UP, // RX (P2)
         gpio::P0_3, // TX (P3, lowest pin on right side when USB points towards top)
-        uart::UARTE1_INFO,
         timer::TIMER1_INFO,
         ppi::PPI_CH0_CH1,
         uart::Config::DEFAULT,

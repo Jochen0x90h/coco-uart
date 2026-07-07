@@ -28,56 +28,55 @@ public:
 
     /// @brief Constructor with only RX and TX pins.
     /// @param loop Event loop
+    /// @param uartInfo Info of USART/UART instance to use
     /// @param rxPin Receive pin (RX), alternative function (see data sheet) and configuration (e.g. PULL_UP, INVERT, can be NONE)
     /// @param txPin Transmit pin (TX), alternative function (see data sheet) and configuration (e.g. INVERT, can be NONE)
-    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
-    /// @param uartInfo Info of USART/UART instance to use
     /// @param dmaInfo Info of DMA channels to use
+    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
     /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
     /// @param baudRate Baud rate (e.g. 38400)
     /// @param rxTimeout Receiver timeout in bit times
-    Uart_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin,
-        Hertz<> clock, const UartInfo &uartInfo, const DmaInfo &dmaInfo,
-        uart::Config config, uart::Format format, int baudRate, int rxTimeout);
+    Uart_UART_DMA(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+        const DmaInfo &dmaInfo, Hertz<> clock, uart::Config config, uart::Format format, int baudRate, int rxTimeout);
 
     /// @brief Constructor with DE pin for transmit enable.
     /// @param loop Event loop
+    /// @param uartInfo Info of USART/UART instance to use
     /// @param rxPin Receive pin (RX), alternative function (see data sheet) and configuration (e.g. PULL_UP, INVERT, can be NONE)
     /// @param txPin Transmit pin (TX), alternative function (see data sheet) and configuration (e.g. INVERT, can be NONE)
     /// @param dePin Driver enable pin (DE), alternative function (see data sheet) and configuration (e.g. INVERT)
-    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
-    /// @param uartInfo Info of USART/UART instance to use
     /// @param dmaInfo Info of DMA channels to use
+    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
     /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
     /// @param baudRate Baud rate (e.g. 38400)
     /// @param rxTimeout Receiver timeout in bit times
-    Uart_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, gpio::Config dePin,
-        Hertz<> clock, const UartInfo &uartInfo, const DmaInfo &dmaInfo,
+    Uart_UART_DMA(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+        gpio::Config dePin, const DmaInfo &dmaInfo, Hertz<> clock,
         uart::Config config, uart::Format format, int baudRate, int rxTimeout)
-        : Uart_UART_DMA(loop, rxPin, txPin, clock, uartInfo,
-        dmaInfo, uartInfo.enableDePin(dePin, config), format, baudRate, rxTimeout)
+        : Uart_UART_DMA(loop, uartInfo, rxPin, txPin, dmaInfo, clock
+        , uartInfo.enableDePin(dePin, config), format, baudRate, rxTimeout)
     {}
 
     /// @brief Constructor with RTS/CTS pins for flow control.
     /// @param loop Event loop
+    /// @param uartInfo Info of USART/UART instance to use
     /// @param rxPin Receive pin (RX), alternative function (see data sheet) and configuration (e.g. PULL_UP, INVERT, can be NONE)
     /// @param txPin Transmit pin (TX), alternative function (see data sheet) and configuration (e.g. INVERT, can be NONE)
     /// @param rtsPin Ready to send output pin (RTS), alternative function (see data sheet) and configuration (can be NONE)
     /// @param ctsPin Clear to send input pin (CTS), alternative function (see data sheet) and configuration (e.g. PULL_UP, can be NONE)
-    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
-    /// @param uartInfo Info of USART/UART instance to use
     /// @param dmaInfo Info of DMA channels to use
+    /// @param clock Peripheral clock frequency (e.g. APB1_CLOCK)
     /// @param config Configuration, see usart::Config. Typically usart::Config::DEFAULT will do the job.
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
     /// @param baudRate Baud rate (e.g. 38400)
     /// @param rxTimeout Receiver timeout in bit times
-    Uart_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, gpio::Config rtsPin, gpio::Config ctsPin,
-        Hertz<> clock, const UartInfo &uartInfo, const DmaInfo &dmaInfo,
+    Uart_UART_DMA(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+        gpio::Config rtsPin, gpio::Config ctsPin, const DmaInfo &dmaInfo, Hertz<> clock,
         uart::Config config, uart::Format format, int baudRate, int rxTimeout)
-        : Uart_UART_DMA(loop, rxPin, txPin, clock, uartInfo,
-        dmaInfo, uartInfo.enableRtsCtsPins(rtsPin, ctsPin, config), format, baudRate, rxTimeout)
+        : Uart_UART_DMA(loop, uartInfo, rxPin, txPin, dmaInfo, clock
+        , uartInfo.enableRtsCtsPins(rtsPin, ctsPin, config), format, baudRate, rxTimeout)
     {}
 
     ~Uart_UART_DMA() override;
