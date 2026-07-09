@@ -34,8 +34,8 @@ public:
     /// @param format Format, see usart::Format. Typically usart::Format::DEFAULT will do the job.
     /// @param baudRate Baud rate (e.g. 38400)
     /// @param rxTimeout Receiver timeout in bit times
-    Rs485_UART_DMA(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin, gpio::Config dePin,
-        Hertz<> clock, const UartInfo &uartInfo, const dma::DualInfo<> &dmaInfo,
+    Rs485_UART_DMA(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin, gpio::Config dePin,
+        const dma::DualInfo<> &dmaInfo, Hertz<> clock,
         uart::Config config, uart::Format format, int baudRate, int rxTimeout)
         : Uart_UART_DMA(loop, uartInfo, rxPin, txPin, dmaInfo, clock, configDe(config, dePin), format, baudRate,
         rxTimeout)

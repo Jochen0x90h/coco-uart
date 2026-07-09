@@ -19,11 +19,11 @@ struct Drivers {
     using Uart = Uart_UART_DMA;
     Uart uart{loop,
         // use USART1
+        uart::USART1_INFO,
         gpio::PA10 | gpio::AF7, // USART1 RX (PA10)
         gpio::PA9 | gpio::AF7, // USART1 TX (PA9)
-        USART1_CLOCK,
-        uart::USART1_INFO,
         dma::DMA1_CH5_CH4_INFO,
+        USART1_CLOCK,
 
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,

@@ -3,6 +3,7 @@ add_library(${PROJECT_NAME})
 target_sources(${PROJECT_NAME}
     PUBLIC FILE_SET headers TYPE HEADERS FILES
         Uart.hpp
+        UartMonitor.hpp
     PRIVATE
         Uart.cpp
 )

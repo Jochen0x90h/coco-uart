@@ -33,12 +33,12 @@ struct Drivers {
     Rs485::Buffer<128> buffer1{uart1};
 
     Rs485 uart2{loop,
+        uart::USART3_INFO,
         gpio::PB8 | gpio::AF7, // USART3 RX (CN5 10)
         gpio::PB9 | gpio::AF7, // USART3 TX (CN5 9)
         gpio::PA8 | gpio::Config::INVERT, // nDE (CN9 8)
-        USART3_CLOCK,
-        uart::USART3_INFO,
         dma::DMA1_CH3_CH4_INFO,
+        USART3_CLOCK,
         uart::Config::DEFAULT,
         uart::Format::DEFAULT,
         38400, // baud rate

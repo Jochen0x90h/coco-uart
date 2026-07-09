@@ -7,8 +7,8 @@
 
 namespace coco {
 
-Uart_UARTE_TIMER::Uart_UARTE_TIMER(Loop_Queue &loop, gpio::Config rxPin, gpio::Config txPin,
-    const UartInfo &uartInfo, const timer::Info &timerInfo, ppi::DualChannel ppiChannels,
+Uart_UARTE_TIMER::Uart_UARTE_TIMER(Loop_Queue &loop, const UartInfo &uartInfo, gpio::Config rxPin, gpio::Config txPin,
+    const timer::Info &timerInfo, ppi::DualChannel ppiChannels,
     uart::Config config, uart::Format format, int baudRate, int rxTimeout)
     : Uart(State::READY)
     , loop_(loop), baudRate_(baudRate)

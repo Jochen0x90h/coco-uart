@@ -58,3 +58,5 @@ class Project(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = [self.name]
+        if self.settings.get_safe("os") == "Windows":
+            self.cpp_info.system_libs = ["SetupAPI"]
