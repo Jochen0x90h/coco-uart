@@ -329,18 +329,14 @@ bool Uart_UART_DMA::BufferBase::cancel() {
             // read: buffer is in receiveTransfers_ list
 
             // cancel if not yet started or still waiting for the first character, otherwise complete normally
-            canceled = device.receiveTransfers_.removeIf(
-                [this, &device](auto &buffer, int index) {
-                    // only cancel this buffer
-                    if (&buffer != this)
-                        return false;
-
+            canceled = device.receiveTransfers_.removeIf(*this,
+                [this, &device](int index) {
                     // cancel if not yet started (not at front of queue)
                     if (index > 0)
                         return true;
 
                     // cancel if we are still waiting for the first character
-                    if (device.rxChannel_.count() == int(buffer.capacity_)) {
+                    if (device.rxChannel_.count() == int(capacity_)) {
                         // disable rx and DMA
                         device.uart_
                             .stopRx()
@@ -358,7 +354,7 @@ bool Uart_UART_DMA::BufferBase::cancel() {
                     // start next buffer if the first buffer was removed
                     if (index == 0)
                         device.startRx(next);
-                }) != nullptr;
+                });
         }
 
         // clear pending read/write operations

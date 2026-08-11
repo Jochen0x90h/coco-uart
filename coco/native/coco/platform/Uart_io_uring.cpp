@@ -158,6 +158,9 @@ void Uart_io_uring::close() {
     com_ = INVALID_HANDLE_VALUE;
     setSuccess();
 
+    // clear pending receive transfers
+    receiveTransfers_.clear();
+
     // set state
     state_ = State::DISABLED;
 
@@ -171,11 +174,17 @@ void Uart_io_uring::close() {
 }
 
 void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
-    if (cqe.res & POLLIN) {
+    if (cqe.res & (POLLERR | POLLHUP | POLLNVAL)) {
+        // device disconnected
+        close();
+    } else if (cqe.res & POLLIN) {
         auto buffer = receiveTransfers_.popIf(
             [this](auto &buffer) {
+                // read data into buffer
                 int count = read(com_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
                 receivedSize_ += count;
+
+                // finished when size is reached (else wait for more data or timeout)
                 return receivedSize_ >= buffer.size_;
             });
         if (!receiveTransfers_.empty()) {
@@ -184,6 +193,7 @@ void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
             loop_.invoke(*this, rxTimeout_);
         }
         if (buffer != nullptr) {
+            // notify application that the buffer is ready
             buffer->setSuccess();
             receivedSize_ = 0;
             buffer->setReady();
@@ -194,6 +204,7 @@ void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
 void Uart_io_uring::onTimeout() {
     auto buffer = receiveTransfers_.pop();
     if (buffer != nullptr) {
+        // notify application that the buffer is ready
         buffer->setSuccess(receivedSize_);
         receivedSize_ = 0;
         buffer->setReady();
@@ -246,13 +257,38 @@ bool Uart_io_uring::Buffer::cancel() {
     if (state_ != State::BUSY)
         return false;
 
-    if (steps_ != 0) {
-        if (!device_.loop_.cancel(*this)) {
-            // error: submit buffer full
-            setError(std::errc::resource_unavailable_try_again);
-            return false;
+    if ((op_ & Op::WRITE) == 0) {
+        // cancel read
+        auto &device = device_;
+
+        // cancel if not yet started or still waiting for the first character, otherwise complete normally
+        bool canceled = device.receiveTransfers_.removeIf(*this,
+            [this, &device](int index) {
+                // cancel if not yet started (not at front of queue)
+                if (index > 0)
+                    return true;
+
+                // cancel if we are still waiting for the first character
+                if (device.receivedSize_ == 0) {
+                    return true;
+                }
+                return false;
+            });
+        if (canceled) {
+            // cancel succeeded: set buffer ready again and resume application code waiting for ready state
+            setError(std::errc::operation_canceled);
+            setReady();
         }
-        steps_ = 0;
+    } else {
+        // cancel write
+        if (steps_ != 0) {
+            if (!device_.loop_.cancel(*this)) {
+                // error: submit buffer full
+                setError(std::errc::resource_unavailable_try_again);
+                return false;
+            }
+            steps_ = 0;
+        }
     }
     return true;
 }
