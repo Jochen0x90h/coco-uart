@@ -54,22 +54,22 @@ namespace {
 } // anonymous namespace
 
 Uart_Win32::~Uart_Win32() {
-    CloseHandle(com_);
+    CloseHandle(handle_);
 }
 
 bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout) {
-    if (com_ != INVALID_HANDLE_VALUE)
+    if (handle_ != INVALID_HANDLE_VALUE)
         return false;
 
     // open com port
-    HANDLE com = CreateFileW(path.c_str(),
+    HANDLE handle = CreateFileW(path.c_str(),
         GENERIC_READ | GENERIC_WRITE,
         0, // no sharing
         nullptr, // security
         OPEN_EXISTING, // open existing port
         FILE_FLAG_OVERLAPPED,
         nullptr);
-    if (com == INVALID_HANDLE_VALUE) {
+    if (handle == INVALID_HANDLE_VALUE) {
         int error = GetLastError();
         setSystemError(error);
         return false;
@@ -77,22 +77,22 @@ bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baud
 
     // add file to completion port of event loop
     if (CreateIoCompletionPort(
-        com,
+        handle,
         loop_.port,
         ULONG_PTR(&static_cast<Loop_Win32::CompletionHandler &>(*this)),
         0) == nullptr)
     {
         int error = GetLastError();
         setSystemError(error);
-        CloseHandle(com);
+        CloseHandle(handle);
         return false;
     }
-    com_ = com;
+    handle_ = handle;
     setSuccess();
 
     // configure
-    setFormatAndBaudRate(com, format, baudRate);
-    coco::setRxTimeout(com, rxTimeout.value);
+    setFormatAndBaudRate(handle, format, baudRate);
+    coco::setRxTimeout(handle, rxTimeout.value);
 
     // store baud rate
     baudRate_ = baudRate;
@@ -103,7 +103,7 @@ bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baud
     // set wait mask
     ULONG value = SERIAL_EV_RLSD | SERIAL_EV_DSR | SERIAL_EV_RING | SERIAL_EV_CTS;
     DWORD transferred;
-    auto result = DeviceIoControl(com_,
+    auto result = DeviceIoControl(handle_,
         IOCTL_SERIAL_SET_WAIT_MASK,
         &value, 4, // input buffer
         nullptr, 0, // output buffer
@@ -114,7 +114,7 @@ bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baud
     memset(&overlapped_, 0, sizeof(OVERLAPPED));
 
     // wait for events
-    DeviceIoControl(com_,
+    DeviceIoControl(handle_,
         IOCTL_SERIAL_WAIT_ON_MASK,
         nullptr, 0, // input buffer
         &mask_, 4, // output buffer
@@ -145,21 +145,21 @@ void Uart_Win32::setValue(int id, int value) {
 
     switch (id) {
     case Value::FORMAT:
-        setFormatAndBaudRate(com_, Format(value), baudRate_);
+        setFormatAndBaudRate(handle_, Format(value), baudRate_);
         break;
     case Value::BAUD:
         baudRate_ = value;
-        coco::setBaudRate(com_, value);
+        coco::setBaudRate(handle_, value);
 
         // set rx timeout in milliseconds
-        coco::setRxTimeout(com_, rxTimeout_ * 1000 / baudRate_ + 1);
+        coco::setRxTimeout(handle_, rxTimeout_ * 1000 / baudRate_ + 1);
         break;
     case Value::RX_TIMEOUT:
         // timeout in bit times
         rxTimeout_ = value;
 
         // set rx timeout in milliseconds
-        coco::setRxTimeout(com_, rxTimeout_ * 1000 / baudRate_ + 1);
+        coco::setRxTimeout(handle_, rxTimeout_ * 1000 / baudRate_ + 1);
         break;
     case Value::OUTPUT_SIGNALS:
         // http://www.ioctls.net/
@@ -170,13 +170,13 @@ void Uart_Win32::setValue(int id, int value) {
 
             // RTS needs to be send first because of a bug in usbser.sys (https://answers.microsoft.com/en-us/windows/forum/all/usbsersys-does-not-handle-rts-signal-correctly/e348047e-dacd-47d5-8e74-1fd2f275bebb)
             DWORD transferred;
-            DeviceIoControl(com_,
+            DeviceIoControl(handle_,
                 rts ? IOCTL_SERIAL_SET_RTS : IOCTL_SERIAL_CLR_RTS,
                 nullptr, 0, // input buffer
                 nullptr, 0, // output buffer
                 &transferred,
                 nullptr);
-            DeviceIoControl(com_,
+            DeviceIoControl(handle_,
                 dtr ? IOCTL_SERIAL_SET_DTR : IOCTL_SERIAL_CLR_DTR,
                 nullptr, 0, // input buffer
                 nullptr, 0, // output buffer
@@ -194,7 +194,7 @@ int Uart_Win32::getValue(int id) {
             // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddser/ni-ntddser-ioctl_serial_set_wait_mask
             DWORD status;
             DWORD transferred;
-            DeviceIoControl(com_, IOCTL_SERIAL_GET_MODEMSTATUS,
+            DeviceIoControl(handle_, IOCTL_SERIAL_GET_MODEMSTATUS,
                 nullptr, 0, // input buffer
                 &status, 4, // output buffer
                 &transferred,
@@ -228,12 +228,12 @@ Uart_Win32::Buffer &Uart_Win32::getBuffer(int index) {
 
 // todo: test what happens when buffers are busy when we call close()
 void Uart_Win32::close() {
-    if (com_ == INVALID_HANDLE_VALUE)
+    if (handle_ == INVALID_HANDLE_VALUE)
         return;
 
-    // close file
-    CloseHandle(com_);
-    com_ = INVALID_HANDLE_VALUE;
+    // close handle
+    CloseHandle(handle_);
+    handle_ = INVALID_HANDLE_VALUE;
     setSuccess();
 
     // set state
@@ -306,7 +306,7 @@ void Uart_Win32::onTimeout() {
     // set wait mask
     ULONG value = SERIAL_EV_RLSD | SERIAL_EV_DSR | SERIAL_EV_RING | SERIAL_EV_CTS;
     DWORD transferred;
-    auto result = DeviceIoControl(com_,
+    auto result = DeviceIoControl(handle_,
         IOCTL_SERIAL_SET_WAIT_MASK,
         &value, 4, // input buffer
         nullptr, 0, // output buffer
@@ -348,7 +348,7 @@ void Uart_Win32::onCompletion(OVERLAPPED *overlapped) {
     // check for state change
     if (overlapped = &overlapped_) {
         DWORD transferred;
-        auto result = GetOverlappedResult(com_, overlapped, &transferred, false);
+        auto result = GetOverlappedResult(handle_, overlapped, &transferred, false);
         if (result) {
             // success
             setSuccess();
@@ -365,7 +365,7 @@ void Uart_Win32::onCompletion(OVERLAPPED *overlapped) {
         notify(Events::SIGNALS_CHANGED);
 
         // wait for events again
-        DeviceIoControl(com_,
+        DeviceIoControl(handle_,
             IOCTL_SERIAL_WAIT_ON_MASK,
             nullptr, 0, // input buffer
             &mask_, 4, // output buffer
@@ -408,10 +408,10 @@ bool Uart_Win32::Buffer::start() {
     int result;
     if ((op_ & Op::WRITE) == 0) {
         // read
-        result = ReadFile(device_.com_, data_, capacity_, nullptr, &overlapped_);
+        result = ReadFile(device_.handle_, data_, capacity_, nullptr, &overlapped_);
     } else {
         // write
-        result = WriteFile(device_.com_, data_, size_, nullptr, &overlapped_);
+        result = WriteFile(device_.handle_, data_, size_, nullptr, &overlapped_);
     }
 
     if (!result) {
@@ -437,7 +437,7 @@ bool Uart_Win32::Buffer::cancel() {
         return false;
 
     if (steps_ != 0) {
-        auto result = CancelIoEx(device_.com_, &overlapped_);
+        auto result = CancelIoEx(device_.handle_, &overlapped_);
         if (!result) {
             int error = GetLastError();
             setSystemError(error);
@@ -453,7 +453,7 @@ bool Uart_Win32::Buffer::cancel() {
 
 void Uart_Win32::Buffer::onCompletion(OVERLAPPED *overlapped) {
     DWORD transferred;
-    auto result = GetOverlappedResult(device_.com_, overlapped, &transferred, false);
+    auto result = GetOverlappedResult(device_.handle_, overlapped, &transferred, false);
     if (result) {
         // success
         if (steps_ == int(Op::READ_WRITE)) {
@@ -464,7 +464,7 @@ void Uart_Win32::Buffer::onCompletion(OVERLAPPED *overlapped) {
             memset(&overlapped_, 0, sizeof(OVERLAPPED));
 
             // read
-            result = ReadFile(device_.com_, data_, capacity_, nullptr, &overlapped_);
+            result = ReadFile(device_.handle_, data_, capacity_, nullptr, &overlapped_);
             if (!result) {
                 int error = GetLastError();
                 if (error != ERROR_IO_PENDING) {

@@ -11,21 +11,21 @@
 namespace coco {
 
 Uart_io_uring::~Uart_io_uring() {
-    ::close(com_);
+    ::close(handle_);
 }
 
 bool Uart_io_uring::open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout) {
-    if (com_ != INVALID_HANDLE_VALUE)
+    if (handle_ != INVALID_HANDLE_VALUE)
         return false;
 
     // open com port
-    int com = ::open(path.c_str(), O_RDWR | O_NOCTTY);
-    if (com == INVALID_HANDLE_VALUE) {
+    int handle = ::open(path.c_str(), O_RDWR | O_NOCTTY);
+    if (handle == INVALID_HANDLE_VALUE) {
         int error = errno;
         setSystemError(error);
         return false;
     }
-    com_ = com;
+    handle_ = handle;
     setSuccess();
 
     // configure
@@ -88,7 +88,7 @@ void Uart_io_uring::setValue(int id, int value) {
 
             // set flags
             termios2 tio;
-            ioctl(com_, TCGETS2, &tio);
+            ioctl(handle_, TCGETS2, &tio);
             tio.c_cflag = (tio.c_cflag & CBAUD) | cflag;
             tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // raw input
             tio.c_oflag &= ~OPOST;                           // raw output
@@ -97,7 +97,7 @@ void Uart_io_uring::setValue(int id, int value) {
             // also set timeouts
             tio.c_cc[VMIN]  = 0; // wait for first character
             tio.c_cc[VTIME] = 0; // timeout
-            ioctl(com_, TCSETS2, &tio);
+            ioctl(handle_, TCSETS2, &tio);
         }
         break;
     case Value::BAUD:
@@ -105,11 +105,11 @@ void Uart_io_uring::setValue(int id, int value) {
             baudRate_ = value;
 
             termios2 tio;
-            ioctl(com_, TCGETS2, &tio);
+            ioctl(handle_, TCGETS2, &tio);
             tio.c_cflag = (tio.c_cflag & ~CBAUD) | BOTHER; // set other baud rate
             tio.c_ispeed = value;
             tio.c_ospeed = value;
-            ioctl(com_, TCSETS2, &tio);
+            ioctl(handle_, TCSETS2, &tio);
         }
         break;
     case Value::RX_TIMEOUT:
@@ -150,12 +150,12 @@ Uart_io_uring::Buffer &Uart_io_uring::getBuffer(int index) {
 
 // todo: test what happens when buffers are busy when we call close()
 void Uart_io_uring::close() {
-    if (com_ == INVALID_HANDLE_VALUE)
+    if (handle_ == INVALID_HANDLE_VALUE)
         return;
 
-    // close file
-    ::close(com_);
-    com_ = INVALID_HANDLE_VALUE;
+    // close handle
+    ::close(handle_);
+    handle_ = INVALID_HANDLE_VALUE;
     setSuccess();
 
     // clear pending receive transfers
@@ -181,7 +181,7 @@ void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
         auto buffer = receiveTransfers_.popIf(
             [this](auto &buffer) {
                 // read data into buffer
-                int count = read(com_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
+                int count = read(handle_, buffer.data_ + receivedSize_, buffer.size_ - receivedSize_);
                 receivedSize_ += count;
 
                 // finished when size is reached (else wait for more data or timeout)
@@ -189,7 +189,7 @@ void Uart_io_uring::onCompletion(io_uring_cqe &cqe, int id) {
             });
         if (!receiveTransfers_.empty()) {
             // poll again if there are more receive transfers waiting
-            loop_.poll(*this, com_, POLLIN);
+            loop_.poll(*this, handle_, POLLIN);
             loop_.invoke(*this, rxTimeout_);
         }
         if (buffer != nullptr) {
@@ -237,10 +237,10 @@ bool Uart_io_uring::Buffer::start() {
     if ((op_ & Op::WRITE) == 0) {
         // read
         if (device.receiveTransfers_.push(*this))
-            device.loop_.poll(device, device.com_, POLLIN);
+            device.loop_.poll(device, device.handle_, POLLIN);
     } else {
         // write
-        if (!device.loop_.transfer(*this, IORING_OP_WRITE, device.com_, 0, data_, size_)) {
+        if (!device.loop_.transfer(*this, IORING_OP_WRITE, device.handle_, 0, data_, size_)) {
             // error: submit buffer full
             setError(std::errc::resource_unavailable_try_again);
             return false;
@@ -303,7 +303,7 @@ void Uart_io_uring::Buffer::onCompletion(io_uring_cqe &cqe, int id) {
 
             auto &device = device_;
             if (device.receiveTransfers_.push(*this))
-                device.loop_.poll(device, device.com_, POLLIN);
+                device.loop_.poll(device, device.handle_, POLLIN);
         } else {
             // set success with transferred size
             setSuccess(result);

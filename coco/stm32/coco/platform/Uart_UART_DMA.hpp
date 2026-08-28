@@ -108,6 +108,7 @@ public:
         bool cancel() override;
 
     protected:
+        // CompletionHandler methods
         void onCompletion() override;
 
         Uart_UART_DMA &device_;

@@ -69,7 +69,7 @@ protected:
     int rxTimeout_;
 
     // COM port handle
-    HANDLE com_ = INVALID_HANDLE_VALUE;
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
 
     // overlapped for monitoring events (e.g. change of DSR signal)
     OVERLAPPED overlapped_;

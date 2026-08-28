@@ -72,6 +72,8 @@ public:
     protected:
         void startRx();
         void startTx();
+
+        // CompletionHandler methods
         void onCompletion() override;
 
         Uart_UARTE_TIMER &device_;

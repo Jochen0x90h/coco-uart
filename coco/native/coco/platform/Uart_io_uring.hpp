@@ -71,7 +71,7 @@ protected:
 
     // COM port handle
     static constexpr int INVALID_HANDLE_VALUE = -1;
-    int com_ = INVALID_HANDLE_VALUE;
+    int handle_ = INVALID_HANDLE_VALUE;
 
     // list of buffers
     IntrusiveList<Buffer> buffers_;
