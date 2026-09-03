@@ -18,8 +18,8 @@ public:
 
     ~UartMonitor_udev() override;
 
-    void listenAdd(std::function<void (const std::filesystem::path &, String)> function, Action action = Action::ENUMERATE_MONITOR) override;
-    void listenRemove(std::function<void (const std::filesystem::path &)>);
+    void listenAdd(std::function<void (DevicePath, String)> function, Action action = Action::ENUMERATE_MONITOR) override;
+    void listenRemove(std::function<void (DevicePath)> function) override;
 
 protected:
     void onCompletion(io_uring_cqe &cqe, int index) override;
@@ -27,8 +27,8 @@ protected:
     Loop_io_uring &loop_;
     struct udev *udev_;
     struct udev_monitor* mon_;
-    std::vector<std::function<void (const std::filesystem::path &, String)>> addListeners_;
-    std::vector<std::function<void (const std::filesystem::path &)>> removeListeners_;
+    std::vector<std::function<void (DevicePath, String)>> addListeners_;
+    std::vector<std::function<void (DevicePath)>> removeListeners_;
 };
 
 } // namespace coco

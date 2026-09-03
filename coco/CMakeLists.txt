@@ -67,7 +67,7 @@ target_link_libraries(${PROJECT_NAME}
     coco-device::coco-device
 )
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} SetupAPI)
+    target_link_libraries(${PROJECT_NAME} SetupAPI cfgmgr32)
 endif()
 if(LINUX)
     target_link_libraries(${PROJECT_NAME} libudev::libudev)

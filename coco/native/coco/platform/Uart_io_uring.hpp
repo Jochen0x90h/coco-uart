@@ -26,7 +26,7 @@ public:
     /// @param baudRate Baud Rate
     /// @param rxTimeout Receive timeout (min. 20ms)
     /// @return true if successful
-    bool open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout);
+    bool open(DevicePath path, Format format, int baudRate, Milliseconds<> rxTimeout);
 
     // Uart methods
     void setValue(int id, int value) override;

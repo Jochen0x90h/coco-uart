@@ -71,8 +71,8 @@ int main(int argc, char **argv) {
     }
 
     // add listener that opens the uart given as command line argument as soon as it appears
-    drivers.monitor.listenAdd([&](const std::filesystem::path &path, String name) {
-        debug::out << name << " (" << path.string() << ")\n";
+    drivers.monitor.listenAdd([&](DevicePath path, String name) {
+        debug::out << name << " (" << path << ")\n";
         if (name == argv[1])
             drivers.uart1.open(path, Uart::Format::DEFAULT, 38400, 20ms);
         if (name == argv[2])

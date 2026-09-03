@@ -57,7 +57,7 @@ Uart_Win32::~Uart_Win32() {
     CloseHandle(handle_);
 }
 
-bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout) {
+bool Uart_Win32::open(DevicePath path, Format format, int baudRate, Milliseconds<> rxTimeout) {
     if (handle_ != INVALID_HANDLE_VALUE)
         return false;
 
@@ -78,7 +78,7 @@ bool Uart_Win32::open(const std::filesystem::path &path, Format format, int baud
     // add file to completion port of event loop
     if (CreateIoCompletionPort(
         handle,
-        loop_.port,
+        loop_.port(),
         ULONG_PTR(&static_cast<Loop_Win32::CompletionHandler &>(*this)),
         0) == nullptr)
     {

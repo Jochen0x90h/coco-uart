@@ -10,32 +10,25 @@ namespace coco {
 
 /// @brief Implementation of UartMonitor using SetupAPI and registry.
 /// Polls every second for new devices.
-class UartMonitor_SetupAPI : public UartMonitor, public Loop_Win32::TimeoutHandler {
+class UartMonitor_SetupAPI : public UartMonitor, public Loop_Win32::DeviceHandler {
 public:
 
     UartMonitor_SetupAPI(Loop_Win32 &loop);
 
     ~UartMonitor_SetupAPI() override;
 
-    void listenAdd(std::function<void (const std::filesystem::path &, String)> function, Action action = Action::ENUMERATE_MONITOR) override;
-    void listenRemove(std::function<void (const std::filesystem::path &)>);
+    void listenAdd(std::function<void (DevicePath, String)> function, Action action = Action::ENUMERATE_MONITOR) override;
+    void listenRemove(std::function<void (DevicePath)> function) override;
 
 protected:
-    void onTimeout() override;
+    // Loop_Win32::DeviceHandler methods
+    void onDeviceChange(Loop_Win32::DeviceType type, bool add, DevicePath path) override;
+
 
     Loop_Win32 &loop_;
 
-    struct DeviceInfo {
-        // name (e.g. COM10)
-        std::string name;
-
-        // flag for "garbage collection" of devices
-        bool flag;
-    };
-    std::map<std::filesystem::path, DeviceInfo> deviceInfos_;
-
-    std::vector<std::function<void (const std::filesystem::path &, String)>> addListeners_;
-    std::vector<std::function<void (const std::filesystem::path &)>> removeListeners_;
+    std::vector<std::function<void (DevicePath, String)>> addListeners_;
+    std::vector<std::function<void (DevicePath)>> removeListeners_;
 };
 
 } // namespace coco

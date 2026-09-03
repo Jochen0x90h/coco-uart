@@ -14,7 +14,7 @@ Uart_io_uring::~Uart_io_uring() {
     ::close(handle_);
 }
 
-bool Uart_io_uring::open(const std::filesystem::path &path, Format format, int baudRate, Milliseconds<> rxTimeout) {
+bool Uart_io_uring::open(DevicePath path, Format format, int baudRate, Milliseconds<> rxTimeout) {
     if (handle_ != INVALID_HANDLE_VALUE)
         return false;
 

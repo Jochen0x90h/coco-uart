@@ -49,7 +49,7 @@ UartMonitor_udev::~UartMonitor_udev() {
     udev_unref(udev_);
 }
 
-void UartMonitor_udev::listenAdd(std::function<void (const std::filesystem::path &, String)> function, Action action) {
+void UartMonitor_udev::listenAdd(std::function<void (DevicePath, String)> function, Action action) {
     if ((action & Action::ENUMERATE) != 0) {
         auto udev = udev_;
         auto enumerate = udev_enumerate_new(udev);
@@ -79,7 +79,7 @@ void UartMonitor_udev::listenAdd(std::function<void (const std::filesystem::path
     }
 }
 
-void UartMonitor_udev::listenRemove(std::function<void (const std::filesystem::path &)> function) {
+void UartMonitor_udev::listenRemove(std::function<void (DevicePath)> function) {
     removeListeners_.push_back(function);
 }
 

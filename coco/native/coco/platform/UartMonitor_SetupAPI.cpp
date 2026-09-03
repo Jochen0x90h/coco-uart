@@ -1,9 +1,10 @@
 #include <coco/platform/WindowsDef.hpp>
 #include <windows.h>
 #include <setupapi.h>
-#include <initguid.h>
+#include <initguid.h> // DEFINE_GUID needed for GUIDs
 #include <ntddser.h> // GUID_DEVINTERFACE_COMPORT
-#include <usbiodef.h>
+#include <devpkey.h> // DEVPKEY_Device_FriendlyName
+#include <cfgmgr32.h>
 #include <coco/platform/WindowsUndef.hpp>
 
 #include "UartMonitor_SetupAPI.hpp"
@@ -22,25 +23,82 @@ namespace {
         Buffer() {};
     };
 
+    // discard high byte of wchar_t in-place and return as coco::String
+    String toString(wchar_t *buffer) {
+        char *begin = (char *)buffer;
+        char *out = begin;
+        while (*buffer != 0) {
+            *out = *buffer;
+            ++buffer;
+            ++out;
+        }
+        *out = 0;
+        return String(begin, out - begin);
+    }
 } // namespace
 
 UartMonitor_SetupAPI::UartMonitor_SetupAPI(Loop_Win32 &loop)
     : loop_(loop)
 {
-    onTimeout();
+    //onTimeout();
+    loop.addDeviceHandler(*this);
 }
 
 UartMonitor_SetupAPI::~UartMonitor_SetupAPI() {
 }
 
-void UartMonitor_SetupAPI::listenAdd(std::function<void (const std::filesystem::path &, String)> function, Action action) {
+void UartMonitor_SetupAPI::listenAdd(std::function<void (DevicePath, String)> function, Action action) {
     if ((action & Action::ENUMERATE) != 0) {
-        for (auto &p : deviceInfos_) {
-            auto &deviceInfo = p.second;
-            if (!deviceInfo.name.empty()) {
-                // call user function
-                function(p.first, deviceInfo.name);
+        // enumerate devices
+        HDEVINFO devs = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+        int index = 0;
+        SP_DEVINFO_DATA deviceData;
+        deviceData.cbSize = sizeof(SP_DEVINFO_DATA);
+        while (SetupDiEnumDeviceInfo(devs, index, &deviceData)) {
+            ++index;
+
+            // get interface data
+            SP_DEVICE_INTERFACE_DATA interfaceData;
+            interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+            if (!SetupDiEnumDeviceInterfaces(devs, &deviceData, &GUID_DEVINTERFACE_COMPORT, 0, &interfaceData)) {
+                continue;
             }
+
+            // buffer for device path and string descriptor
+            Buffer buffer;
+
+            // get device path
+            buffer.devicePath.cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+            SP_DEVINFO_DATA devInfoData;
+            devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+            if (!SetupDiGetDeviceInterfaceDetailW(devs, &interfaceData, &buffer.devicePath, sizeof(buffer), nullptr, &devInfoData))
+                continue;
+            DevicePath path = buffer.devicePath.DevicePath;
+
+            // get registry key
+            HKEY regKey = SetupDiOpenDevRegKey(devs, &devInfoData, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+            if (regKey == INVALID_HANDLE_VALUE)
+                continue;
+
+            // get port name
+            wchar_t portName[64];
+            ULONG portNameSize = sizeof(portName);
+            DWORD valueType = 0;
+            LSTATUS status = RegQueryValueExW(
+                regKey,
+                L"PortName",
+                NULL,
+                &valueType,
+                (LPBYTE)portName,
+                &portNameSize);
+            RegCloseKey(regKey);
+            if (status != ERROR_SUCCESS || valueType != REG_SZ)
+                continue;
+
+            String name = toString(portName);
+
+            // call user function
+            function(path, name);
         }
     }
     if ((action & Action::MONITOR) != 0) {
@@ -48,102 +106,75 @@ void UartMonitor_SetupAPI::listenAdd(std::function<void (const std::filesystem::
     }
 }
 
-void UartMonitor_SetupAPI::listenRemove(std::function<void (const std::filesystem::path &)> function) {
+void UartMonitor_SetupAPI::listenRemove(std::function<void (DevicePath)> function) {
     removeListeners_.push_back(function);
 }
 
-void UartMonitor_SetupAPI::onTimeout() {
-    // restart timeout
-    loop_.invoke(*this, 1s);
+void UartMonitor_SetupAPI::onDeviceChange(Loop_Win32::DeviceType type, bool add, DevicePath path) {
+    if (type != Loop_Win32::DeviceType::COM)
+        return;
+    if (add) {
+        // get device instance id
+        wchar_t instanceId[MAX_DEVICE_ID_LEN] = {};
+        ULONG instanceIdSize = sizeof(instanceId);
+        DEVPROPTYPE propType;
+        CONFIGRET ret = CM_Get_Device_Interface_PropertyW(
+            path.c_str(),
+            &DEVPKEY_Device_InstanceId,
+            &propType,
+            (PBYTE)instanceId,
+            &instanceIdSize,
+            0
+        );
+        if (ret != CR_SUCCESS)
+            return;
 
-    // flag all devices
-    for (auto &p : deviceInfos_) {
-        p.second.flag = true;
-    }
-
-    // enumerate devices
-    HDEVINFO devs = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    int index = 0;
-    SP_DEVINFO_DATA deviceData;
-    deviceData.cbSize = sizeof(SP_DEVINFO_DATA);
-    while (SetupDiEnumDeviceInfo(devs, index, &deviceData)) {
-        ++index;
-
-        // get interface data
-        SP_DEVICE_INTERFACE_DATA interfaceData;
-        interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-        if (!SetupDiEnumDeviceInterfaces(devs, &deviceData, &GUID_DEVINTERFACE_COMPORT, 0, &interfaceData)) {
-            continue;
+        // get device node
+        DEVNODE devNode;
+        ret = CM_Locate_DevNodeW(&devNode, instanceId, CM_LOCATE_DEVNODE_NORMAL);
+        if (ret != CR_SUCCESS) {
+            wprintf(L"Fehler beim Lokalisieren des DevNodes. CR_Code: 0x%X\n", ret);
+            return;
         }
 
-        // buffer for device path and string descriptor
-        Buffer buffer;
+        // open device parameters registry key of the device
+        HKEY hKey = NULL;
+        ret = CM_Open_DevNode_Key(
+            devNode,
+            KEY_READ,
+            0,
+            RegDisposition_OpenExisting,
+            &hKey,
+            CM_REGISTRY_HARDWARE // Greift auf die Hardware-Parameter des konkreten Interfaces zu
+        );
+        if (ret != CR_SUCCESS || hKey == NULL)
+            return;
 
-        // get device path
-        buffer.devicePath.cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
-        SP_DEVINFO_DATA devInfoData;
-        devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
-        if (!SetupDiGetDeviceInterfaceDetailW(devs, &interfaceData, &buffer.devicePath, sizeof(buffer), nullptr, &devInfoData)) {
-            // error
-            continue;
+        // get port name (e.g. COM10) from registry
+        wchar_t portName[64] = {};
+        DWORD portNameSize = sizeof(portName);
+        DWORD valueType = 0;
+        LSTATUS regRet = RegQueryValueExW(
+            hKey,
+            L"PortName",
+            NULL,
+            &valueType,
+            (LPBYTE)portName,
+            &portNameSize
+        );
+        if (regRet != ERROR_SUCCESS || valueType != REG_SZ)
+            return;
+
+        String name = toString(portName);
+
+        // call add listeners
+        for (auto &function : addListeners_) {
+            function(path, name);
         }
-
-        // check if device is new
-        wchar_t *path = buffer.devicePath.DevicePath;
-        auto [it, inserted] = deviceInfos_.emplace(path, DeviceInfo{});
-        auto &deviceInfo = it->second;
-        //debug::out << it->first.string() << '\n';
-
-        if (inserted) {
-            // found a new device, path has the form \\?\usb#vid_1915&pid_1337#5&41045ef&0&4#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
-
-            // get registry key
-            HKEY regKey = SetupDiOpenDevRegKey(devs, &devInfoData, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
-            if (regKey == INVALID_HANDLE_VALUE) {
-                continue;
-            }
-
-            // get port name
-            wchar_t portName[64];
-            DWORD valueSize = sizeof(portName);
-            DWORD valueType = 0;
-            LSTATUS status = RegQueryValueExW(regKey, L"PortName", NULL, &valueType, (LPBYTE)portName, &valueSize);
-            RegCloseKey(regKey);
-            if (status != ERROR_SUCCESS || valueType != REG_SZ) {
-                continue;
-            }
-            int utf8Length = WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)portName, wcslen(portName), nullptr, 0,
-                nullptr, nullptr);
-            if (utf8Length <= 0)
-                continue;
-            deviceInfo.name.assign(utf8Length, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)portName, wcslen(portName), deviceInfo.name.data(), utf8Length,
-                nullptr, nullptr);
-
-            // call add listeners
-            for (auto &function : addListeners_) {
-                function(it->first, deviceInfo.name);
-            }
-        }
-        deviceInfo.flag = false;
-    }
-
-    // detect removed devices
-    auto it = deviceInfos_.begin();
-    while (it != deviceInfos_.end()) {
-        auto current = it;
-        ++it;
-        if (current->second.flag) {
-            auto &deviceInfo = current->second;
-            if (!deviceInfo.name.empty()) {
-                // call remove listeners
-                for (auto &function : removeListeners_) {
-                    function(current->first);
-                }
-            }
-
-            // erase
-            deviceInfos_.erase(current);
+    } else {
+        // call remove listeners
+        for (auto &function : removeListeners_) {
+            function(path);
         }
     }
 }

@@ -13,11 +13,11 @@ using namespace coco;
 int main() {
     debug::out << "UartMonitor-Test\n";
 
-    drivers.monitor.listenAdd([](const std::filesystem::path &device, String name) {
-        debug::out << name << " (" << device.string() << ")\n";
+    drivers.monitor.listenAdd([](DevicePath device, String name) {
+        debug::out << name << " (" << device << ")\n";
     });
-    drivers.monitor.listenRemove([](const std::filesystem::path &device) {
-        debug::out << " (" << device.string() << ")\n";
+    drivers.monitor.listenRemove([](DevicePath device) {
+        debug::out << " (" << device << ")\n";
     });
 
     drivers.loop.run();
