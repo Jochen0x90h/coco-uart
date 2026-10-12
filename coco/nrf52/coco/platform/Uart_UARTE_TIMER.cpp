@@ -277,7 +277,7 @@ bool Uart_UARTE_TIMER::BufferBase::cancel() {
             }
         }
 
-        // clear pending read/write operations
+        // clear pending read/write operations (e.g. read after write)
         steps_ = 0;
     }
 
